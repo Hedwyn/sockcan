@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sockcan"
+# setting version to VCS so hatch will automatically use tags for versioning
+dynamic = ["version"]
+description = "Provides a socketcan-alike interface other arbitrary CAN drivers"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "Baptiste Pestourie" }]
+dependencies = ["click"]
+
+[project.optional-dependencies]
+test = ["hypothesis", "pytest", "python-can"]
+
+[project.urls]
+Homepage = "https://github.com/Hedwyn/sockcan"
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sockcan"]
