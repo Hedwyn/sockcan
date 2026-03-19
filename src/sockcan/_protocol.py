@@ -12,7 +12,7 @@ import struct
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, auto
-from functools import partial
+from functools import lru_cache, partial
 from typing import Any, NamedTuple, NewType, Protocol, cast
 
 SocketcanFd = NewType("SocketcanFd", socket.socket)
@@ -71,6 +71,7 @@ SO_TIMESTAMPNS = 35
 CAN_EFF_FLAG = 0x80000000
 CAN_RAW_LOOPBACK = 3
 CAN_FRAME_HEADER_STRUCT = struct.Struct("=IBB2x")
+CAN_EXTENSION_MASK = 0x07FFF800
 
 
 @dataclass(slots=True, frozen=True)
@@ -80,7 +81,7 @@ class SocketcanConfig:
     """
 
     channel: str = "can0"
-    loopback: LoopbackMode = LoopbackMode.OFF
+    loopback: LoopbackMode = LoopbackMode.FOR_OTHER_SOCKS
 
 
 def connect_to_socketcan(config: SocketcanConfig) -> SocketcanFd:
@@ -122,6 +123,8 @@ class RecvMsgFn(Protocol):
 
 type HeaderUnpack = Callable[[bytes], tuple[int, int, int]]
 type TimestampUnpack = Callable[[bytes], tuple[int, int]]
+
+type HeaderPack = Callable[[int, int, int], bytes]
 
 
 def _socketcan_recv(
@@ -174,3 +177,50 @@ def build_recv_func(fd: SocketcanFd) -> RecvFn:
     Builds the receive function for socketcan socket `fd`.
     """
     return partial(_socketcan_recv, fd.recvmsg)
+
+
+@lru_cache(maxsize=1024)
+def build_tx_header(
+    can_id: int,
+    dlc: int,
+    *,
+    is_extended_id: bool = False,
+    _header_pack: HeaderPack = CAN_FRAME_HEADER_STRUCT.pack,
+    _can_eff_flag: int = CAN_EFF_FLAG,
+    _can_extension_mask: int = CAN_EXTENSION_MASK,
+) -> bytes:
+    """
+    Encodes the CAN header bytes for a given ID and DLC
+    """
+    if is_extended_id or (can_id & _can_extension_mask) > 0:
+        can_id |= _can_eff_flag
+
+    return _header_pack(can_id, dlc, 0)
+
+
+class SendMsgFn(Protocol):
+    def __call__(self, data: bytes, flags: int = 0, /) -> int: ...
+
+
+def send_can_message(
+    send_fn: SendMsgFn,
+    arbitration_id: int,
+    data: bytes,
+    is_extended: bool = False,  # noqa: FBT001, FBT002
+) -> None:
+    """
+    Sends a can message specified with `data` and `arbitration_id`
+    using the socket send function `send_fn`
+    """
+    header = build_tx_header(arbitration_id, data.__len__(), is_extended_id=is_extended)
+    send_fn(header + data.ljust(8, b"\0"))
+
+
+type SendFn = Callable[[int, bytes, bool], None]
+
+
+def build_send_func(fd: SocketcanFd) -> SendFn:
+    """
+    Builds the send function for socketcan socket `fd`.
+    """
+    return partial(send_can_message, fd.send)
