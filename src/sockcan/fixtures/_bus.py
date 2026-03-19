@@ -46,7 +46,7 @@ def skip_if_no_vcan[T: Callable[..., None]]() -> Callable[[T], T]:
     A pytest mark that skips the test if no vcan is available.
     """
     return pytest.mark.skipif(
-        has_vcan(),
+        not has_vcan(),
         reason="VCAN channel (vcan0) needs to be available for testing",
     )
 
