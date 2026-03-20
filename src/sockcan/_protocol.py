@@ -13,6 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, auto
 from functools import lru_cache, partial
+from time import time_ns
 from typing import Any, NamedTuple, NewType, Protocol, cast
 
 SocketcanFd = NewType("SocketcanFd", socket.socket)
@@ -31,6 +32,9 @@ class CanMessage:
     data: bytes
     is_extended_id: bool
     timestamp: float
+
+    def __iter__(self) -> tuple[int, bytes, bool]:
+        return (self.arbitration_id, self.data, self.is_extended_id)
 
 
 def get_received_ancillary_buf_size() -> int:
@@ -143,6 +147,7 @@ def _socketcan_recv(
     # Warning: these defaulted parameters are mainly there
     # to inject the constants in local scope and speed up their access.
     _header_unpack: HeaderUnpack = CAN_FRAME_HEADER_STRUCT.unpack_from,
+    _time_fn: Callable[[], int] = time_ns,
     _timestamp_unpack: TimestampUnpack = RECEIVED_TIMESTAMP_STRUCT.unpack_from,
     _canfd_mtu: int = CANFD_MTU,
     _can_eff_flag: int = CAN_EFF_FLAG,
@@ -168,11 +173,15 @@ def _socketcan_recv(
     data = cf[8 : 8 + can_dlc]
     can_id = can_id & custom_mask
 
-    assert ancillary_data, "ancillary data was not enabled on the socket"
-    cmsg_data = ancillary_data[0][2]
+    if _ancillary_data_size > 0:
+        assert ancillary_data, "ancillary data was not enabled on the socket"
+        cmsg_data = ancillary_data[0][2]
 
-    seconds, nanoseconds = _timestamp_unpack(cmsg_data)
-    timestamp = seconds + nanoseconds * 1e-9
+        seconds, nanoseconds = _timestamp_unpack(cmsg_data)
+        timestamp = seconds + nanoseconds * 1e-9
+    else:
+        timestamp = _time_fn() * 1e-9
+
     # updating data
     return CanMessage(can_id, data, is_extended, timestamp)
 
@@ -180,11 +189,12 @@ def _socketcan_recv(
 type RecvFn = Callable[[], CanMessage]
 
 
-def build_recv_func(fd: SocketcanFd) -> RecvFn:
+def build_recv_func(fd: SocketcanFd, *, use_native_timestamps: bool = True) -> RecvFn:
     """
     Builds the receive function for socketcan socket `fd`.
     """
-    return partial(_socketcan_recv, fd.recvmsg)
+    ancillary_data_size = get_received_ancillary_buf_size() if use_native_timestamps else 0
+    return partial(_socketcan_recv, fd.recvmsg, _ancillary_data_size=ancillary_data_size)
 
 
 @lru_cache(maxsize=1024)
@@ -210,7 +220,7 @@ class SendMsgFn(Protocol):
     def __call__(self, data: bytes, flags: int = 0, /) -> int: ...
 
 
-def send_can_message(
+def _socketcan_send(
     send_fn: SendMsgFn,
     arbitration_id: int,
     data: bytes,
@@ -231,4 +241,4 @@ def build_send_func(fd: SocketcanFd) -> SendFn:
     """
     Builds the send function for socketcan socket `fd`.
     """
-    return partial(send_can_message, fd.send)
+    return partial(_socketcan_send, fd.send)

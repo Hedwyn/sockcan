@@ -7,6 +7,7 @@ Test suite for the socketcan server
 
 from __future__ import annotations
 
+from socket import socket
 import threading
 from typing import TYPE_CHECKING, Literal
 
@@ -15,7 +16,9 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from sockcan import build_recv_func
+from sockcan._protocol import build_send_func
 from sockcan.daemon import SocketcanServer
+from sockcan.daemon._server import ServerDirection
 from sockcan.fixtures import can_messages, rx_can_bus, tx_can_bus, vcan_bus
 
 if TYPE_CHECKING:
@@ -42,15 +45,15 @@ def socketcan_server() -> Generator[SocketcanServer, None, None]:
 
 @given(can_messages=st.lists(can_messages(), min_size=10, max_size=100))
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=10)
-def test_single_consumer(
+def test_single_consumer_rx(
     can_messages: list[PyCanMessage],
     tx_can_bus: SocketcanBus,
     socketcan_server: SocketcanServer,
 ) -> None:
     with vcan_bus() as rx_bus:
         socketcan_server = SocketcanServer(rx_bus)
-        threading.Thread(target=socketcan_server.run, daemon=True).start()
         consumer = socketcan_server.subscribe()
+        socketcan_server.start(direction=ServerDirection.RX_ONLY)
         recv_fn = build_recv_func(consumer, use_native_timestamps=False)
 
         for msg in can_messages:
@@ -59,3 +62,27 @@ def test_single_consumer(
             assert obtained.data == msg.data
             assert obtained.arbitration_id == msg.arbitration_id
             assert obtained.is_extended_id is msg.is_extended_id
+
+
+@given(can_messages=st.lists(can_messages(), min_size=10, max_size=100))
+@settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=10)
+def test_single_consumer_tx(
+    can_messages: list[PyCanMessage],
+    rx_can_bus: SocketcanBus,
+    socketcan_server: SocketcanServer,
+) -> None:
+    with vcan_bus() as tx_bus:
+        socketcan_server = SocketcanServer(tx_bus)
+        consumer = socketcan_server.subscribe()
+        socketcan_server.start(direction=ServerDirection.TX_ONLY)
+        send_fn = build_send_func(consumer)
+
+        for msg in can_messages:
+            send_fn(msg.arbitration_id, bytes(msg.data), msg.is_extended_id)
+            obtained = rx_can_bus.recv()
+            assert obtained is not None
+            assert obtained.data == msg.data
+            assert obtained.arbitration_id == msg.arbitration_id
+            assert obtained.is_extended_id is msg.is_extended_id
+    socketcan_server.stop()
+    socketcan_server.join()
