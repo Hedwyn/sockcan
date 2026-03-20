@@ -14,11 +14,18 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from functools import lru_cache, partial
 from time import time_ns
-from typing import Any, NamedTuple, NewType, Protocol, cast
+from typing import Any, Literal, NamedTuple, NewType, Protocol, cast, overload
 
 SocketcanFd = NewType("SocketcanFd", socket.socket)
 
 RECEIVED_TIMESTAMP_STRUCT = struct.Struct("@ll")
+
+
+class CanMessageProtocol(Protocol):
+    arbitration_id: int
+    data: bytes | bytearray
+    is_extended_id: bool
+    timestamp: float
 
 
 @dataclass(slots=True)
@@ -234,11 +241,41 @@ def _socketcan_send(
     send_fn(header + data.ljust(8, b"\0"))
 
 
+def _socketcan_send_msg(
+    send_fn: SendMsgFn,
+    message: CanMessageProtocol,
+) -> None:
+    """
+    Sends a can message specified with `data` and `arbitration_id`
+    using the socket send function `send_fn`
+    """
+    header = build_tx_header(
+        message.arbitration_id,
+        message.data.__len__(),
+        is_extended_id=message.is_extended_id,
+    )
+    send_fn(header + message.data.ljust(8, b"\0"))
+
+
+# SendFn -> to pass directly arbitration_id, data and extended flag as args
+# MessageSendFn -> when passing a container implementing CanMessageProtocol to the sender
 type SendFn = Callable[[int, bytes, bool], None]
+type MessageSendFn = Callable[[CanMessageProtocol], None]
 
 
-def build_send_func(fd: SocketcanFd) -> SendFn:
+@overload
+def build_send_func(fd: SocketcanFd, *, expects_msg_cls: Literal[True]) -> MessageSendFn: ...
+
+
+@overload
+def build_send_func(fd: SocketcanFd, *, expects_msg_cls: Literal[False]) -> SendFn: ...
+
+
+def build_send_func(fd: SocketcanFd, *, expects_msg_cls: bool = False) -> SendFn | MessageSendFn:
     """
     Builds the send function for socketcan socket `fd`.
     """
-    return partial(_socketcan_send, fd.send)
+    if expects_msg_cls:
+        return partial(_socketcan_send_msg, fd.send)
+    else:
+        return partial(_socketcan_send, fd.send)
