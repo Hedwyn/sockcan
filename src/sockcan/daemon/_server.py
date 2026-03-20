@@ -85,6 +85,13 @@ class SocketcanServer:
         self._threads: list[Thread] = []
         self._selector.register(self._kill_switch_rx, events=EVENT_READ, data=None)
 
+    @property
+    def running(self) -> bool:
+        """
+        Whether message forwarding is currently running.
+        """
+        return self._running
+
     def subscribe(self, filters: set[int] | None = None) -> SocketcanFd:
         """
         Subscibes to the bus; returns a socketcan-like socket that can be used
