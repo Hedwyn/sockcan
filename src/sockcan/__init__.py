@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from ._protocol import (
     RecvFn,
+    SendFn,
     SocketcanConfig,
     SocketcanFd,
     build_recv_func,
@@ -18,6 +19,7 @@ from ._protocol import (
 
 __all__ = [
     "RecvFn",
+    "SendFn",
     "SocketcanConfig",
     "SocketcanFd",
     "build_recv_func",
