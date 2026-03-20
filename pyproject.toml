@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling", "hatch-vcs"]
+requires = ["hatchling", "hatch-vcs", "smelt[build]==0.4.5"]
 build-backend = "hatchling.build"
 
 [project]
@@ -25,3 +25,9 @@ source = "vcs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sockcan"]
+
+[tool.hatch.build.hooks.smelt]
+packages_location = { "sockcan" = "src/sockcan" }
+
+[[tool.hatch.build.hooks.smelt.mypyc_modules]]
+import_path = "sockcan._protocol"
