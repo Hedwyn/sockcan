@@ -20,7 +20,13 @@ SocketcanFd = NewType("SocketcanFd", socket.socket)
 RECEIVED_TIMESTAMP_STRUCT = struct.Struct("@ll")
 
 
-class CanMessage(NamedTuple):
+@dataclass(slots=True)
+class CanMessage:
+    """
+    Container for CAN message data that matches field naming
+    use by python-can's Message.
+    """
+
     arbitration_id: int
     data: bytes
     is_extended_id: bool
@@ -154,14 +160,16 @@ def _socketcan_recv(
         raise exc_class(msg) from error
 
     can_id, can_dlc, _ = _header_unpack(cf)
-    is_extended = bool(can_id & _can_eff_flag)
+    # is_extended = bool(can_id & _can_eff_flag)
+    # Note: `'not not' is faster than bool
+    is_extended = not not (can_id & _can_eff_flag)  # noqa: SIM208
     can_id = can_id & 0x1FFFFFFF
 
     data = cf[8 : 8 + can_dlc]
     can_id = can_id & custom_mask
 
     assert ancillary_data, "ancillary data was not enabled on the socket"
-    *_, cmsg_data = ancillary_data[0]
+    cmsg_data = ancillary_data[0][2]
 
     seconds, nanoseconds = _timestamp_unpack(cmsg_data)
     timestamp = seconds + nanoseconds * 1e-9
