@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 TEST_MSG = can.Message(arbitration_id=0x200, data=b"\x00\x01\x02\x03\x04\x05\x06\x07")
 
 
-def bench(
+def bench_rx(
     recv_fn: RecvFn | Callable[..., object],
     tx_bus: SocketcanBus,
     test_msg: Message = TEST_MSG,
@@ -34,7 +34,7 @@ def bench(
     """
     Profiles the receiver from this project against python-can.
     `batch_size` should be small enough to fit in the receiver buffer,
-    as they will be sent at once without consuming them.
+    as they will be sent at onBuffer, ce without consuming them.
     Total messages sent is equal to batch_size * total_rounds.
     """
     profile = cProfile.Profile()

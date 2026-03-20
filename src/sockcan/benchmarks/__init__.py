@@ -7,6 +7,6 @@ Centralizes imports.
 
 from __future__ import annotations
 
-from ._bench import bench
+from ._bench import bench_rx
 
-__all__ = ["bench"]
+__all__ = ["bench_rx"]

@@ -94,7 +94,7 @@ class SocketcanServer:
         _ours, _theirs = socket.socketpair()
         ours = cast("SocketcanFd", _ours)
         theirs = cast("SocketcanFd", _theirs)
-        send_fn = build_send_func(ours)
+        send_fn = build_send_func(ours, expects_msg_cls=False)
         recv_fn = build_recv_func(ours, use_native_timestamps=False)
         self._consumers.append(_Consumer(send_fn, filters))
         self._selector.register(ours, events=EVENT_READ, data=recv_fn)

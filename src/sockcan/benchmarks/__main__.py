@@ -14,7 +14,7 @@ import click
 from sockcan._protocol import SocketcanConfig, build_recv_func, connect_to_socketcan
 from sockcan.fixtures import vcan_bus
 
-from ._bench import bench
+from ._bench import bench_rx
 
 
 @click.command()
@@ -26,14 +26,19 @@ def cli(*, rounds: int, batch_size: int, verbose: bool) -> None:
     Runs the benchmarks interactively
     """
     with vcan_bus() as tx_bus, vcan_bus() as rx_bus:
-        python_can_profile = bench(rx_bus.recv, tx_bus, batch_size=batch_size, total_rounds=rounds)
+        python_can_profile = bench_rx(
+            rx_bus.recv,
+            tx_bus,
+            batch_size=batch_size,
+            total_rounds=rounds,
+        )
 
         if verbose:
             python_can_profile.print_stats()
 
         sockcan_sock = connect_to_socketcan(SocketcanConfig(channel="vcan0"))
         recv_fn = build_recv_func(sockcan_sock)
-        sockcan_profile = bench(recv_fn, tx_bus, batch_size=batch_size, total_rounds=rounds)
+        sockcan_profile = bench_rx(recv_fn, tx_bus, batch_size=batch_size, total_rounds=rounds)
         if verbose:
             sockcan_profile.print_stats()
 
