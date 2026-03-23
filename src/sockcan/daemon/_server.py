@@ -13,16 +13,22 @@ from __future__ import annotations
 import logging
 import socket
 import struct
+import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum, auto
+from functools import partial
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from selectors import EVENT_READ, DefaultSelector
+from socketserver import ThreadingMixIn
 from threading import Event, Thread
 from typing import TYPE_CHECKING, NamedTuple, Self, cast
+from urllib.parse import parse_qs, urlparse
 
 import can
-from can import BusState, Message
+from can import Bus, BusState, Message
+from can.typechecking import Channel
 
 from sockcan import SendFn, SocketcanFd, build_recv_func, build_send_func
 
@@ -91,6 +97,10 @@ class SocketcanServer:
         self._selector.register(self._kill_switch_rx, events=EVENT_READ, data=None)
 
     @property
+    def bus(self) -> BusABC | None:
+        return self._bus
+
+    @property
     def is_virtual(self) -> bool:
         """
         Whether this bus is simulated.
@@ -104,19 +114,25 @@ class SocketcanServer:
         """
         return self._running
 
+    def listen_to(self, fd: SocketcanFd, filters: set[int] | None = None) -> None:
+        send_fn = build_send_func(fd, expects_msg_cls=False)
+        recv_fn = build_recv_func(fd, use_native_timestamps=False)
+        self._consumers.append(_Consumer(send_fn, fd, filters))
+        self._selector.register(fd, events=EVENT_READ, data=recv_fn)
+        if self.running:
+            # interrupting selection to refresh selection targets
+            self._kill_switch_tx.send(b"0")
+
     def subscribe(self, filters: set[int] | None = None) -> SocketcanFd:
         """
-        Subscibes to the bus; returns a socketcan-like socket that can be used
+        Subscribes to the bus; returns a socketcan-like socket that can be used
         with socketcan protocol.
         If filters is passed, only messages with requested filters will be forwarded.
         """
         _ours, _theirs = socket.socketpair()
         ours = cast("SocketcanFd", _ours)
         theirs = cast("SocketcanFd", _theirs)
-        send_fn = build_send_func(ours, expects_msg_cls=False)
-        recv_fn = build_recv_func(ours, use_native_timestamps=False)
-        self._consumers.append(_Consumer(send_fn, ours, filters))
-        self._selector.register(ours, events=EVENT_READ, data=recv_fn)
+        self.listen_to(ours, filters=filters)
         return theirs
 
     @classmethod
@@ -139,6 +155,7 @@ class SocketcanServer:
         """
         Starts both TX and RX thread.
         """
+        _logger.info("Starting socketcanserver on %s", self._bus)
         if self._running:
             raise RuntimeError("Already started")
         self._threads.clear()
@@ -238,6 +255,7 @@ class SocketcanServer:
                     assert kill_switch.recv(1) == b"0"
                     if not self._running:
                         break
+                    _logger.info("Selection interrupted, resuming")
                     # otherwise, kill_switch was used to reset selection, when consumers
                     # are registered or unregistered
                     continue
@@ -259,3 +277,189 @@ class SocketcanServer:
                     )
                     bus_send(py_can_msg)
         _logger.info("Stopping sender thread, we've got terminated")
+
+
+class _UserError(Exception):
+    pass
+
+
+class SubscriptionHandler(BaseHTTPRequestHandler):
+    def __init__(
+        self, on_subscribe: Callable[[str], None], on_unsubscribe: Callable[[str], None]
+    ) -> None:
+        self.on_subscribe = on_subscribe
+        self.on_unsubscribe = on_unsubscribe
+
+
+class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+
+
+class SocketcanDaemon(BaseHTTPRequestHandler):
+    """
+    Proviedes the Socketcan service over an HTTP server.
+    Allows registering buses that should be managed by this daemon.
+    Forwards the CAN traffic using socketcan protocol to subscribers.
+    Use /subscribe endpoint (with channel?=channel_name) to get a socket.
+    """
+
+    def __init__(self, url: str = "localhost", port: int = 8000) -> None:
+        self._port = port
+        self._url = url
+        self._httpd = ThreadedHTTPServer((url, port), partial(self._RequestHandler, daemon=self))
+
+        self._httpd_thread: Thread | None = None
+        self._servers: dict[str, SocketcanServer] = {}
+
+    class _RequestHandler(BaseHTTPRequestHandler):
+        """
+        The handler object that should be spawned on each request,
+        as expected by HTTPServer.
+        Keeps track of the parent daemon so that it can call the internal subscription logic.
+        """
+
+        def __init__(
+            self,
+            request: socket.socket | tuple[bytes, socket.socket],
+            client_address: tuple[str, int],
+            server: HTTPServer,
+            daemon: SocketcanDaemon,
+        ) -> None:
+            self.daemon = daemon
+            super().__init__(request, client_address, server)
+
+        def do_GET(self) -> None:
+            """
+            Handler for GET requests.
+            """
+            # Parse the URL to get the path and the query parameters
+            parsed_url = urlparse(self.path)
+            path = parsed_url.path
+            params = parse_qs(parsed_url.query)
+
+            # Extract 'channel' parameter
+            channel = params.get("channel", [None])[0]
+            _logger.info("Received subscribe request for channel %s: %s", channel, path)
+            if channel is None:
+                self.send_response_and_content("Channel must be specified", code=400)
+                return
+            if (server := self.daemon._servers.get(channel)) is None:
+                _logger.info("No server")
+                self.send_response_and_content(
+                    "Requested channel is not managed by this daemon",
+                    code=400,
+                )
+                return
+
+            if path == "/subscribe":
+                self.send_response(101)
+                self.send_header("Upgrade", "socketcan")
+                self.send_header("Connection", "Upgrade")
+                self.end_headers()
+                self.wfile.flush()  # Ensure headers are actually on the wire
+                sock = self.request
+                assert server.running, "Server should have been started already"
+                _logger.info("Listening to socket")
+                server.listen_to(sock)
+                _logger.info("Upgrading connection to socketcan")
+                # TODO: wait for socket to close
+                time.sleep(1000)
+
+            elif path == "/unsubscribe":
+                raise NotImplementedError
+
+            else:
+                self.send_response(404)
+                self.end_headers()
+                self.wfile.write(b"404 Not Found: Provide a 'channel' parameter.")
+
+        def send_response_and_content(self, message: str, code: int = 200) -> None:
+            """
+            Small helper to send a response with required headers as standalone.
+            """
+            self.send_response(code)
+            self.send_header("Content-type", "text/plain")
+            self.end_headers()
+            self.wfile.write(message.encode())
+
+    def register_virtual_bus(self, channel: str = "vcan0") -> None:
+        """
+        Registers a new virtual bus that should be available from this daemon.
+        Communications within the bus are simulated and will only be seen by the consumers
+        of that bus.
+        """
+        virtual_server = SocketcanServer()
+        self._servers[channel] = SocketcanServer()
+        if self.is_running:
+            virtual_server.start()
+
+    def register_bus(self, channel: str, interface: str, bitrate: int = 500_000) -> None:
+        """
+        Registers the parameters for a new bus that should be managed by this daemon.
+        """
+        bus = can.Bus(interface=interface, channel=channel, bitrate=bitrate)
+        server = SocketcanServer(bus)
+        self._servers[channel] = server
+
+    def start_socketcan_servers(self) -> None:
+        """
+        Starts all the registered socketcan servers.
+        """
+        for channel, server in self._servers.items():
+            if server.is_virtual:
+                _logger.info("Starting virtual socketcan server on channel %s", channel)
+            else:
+                _logger.info("Starting socketcan server on channel %s", channel)
+            server.start()
+
+    @property
+    def port(self) -> int:
+        """
+        The port uses by the HTTP server.
+        """
+        return self._port
+
+    @property
+    def url(self) -> str:
+        """
+        The URL to which the HTTP server is bound.
+        """
+        return self._url
+
+    @property
+    def is_running(self) -> bool:
+        """
+        Whether the daemon thread is currently running.
+        """
+        return self._httpd_thread is not None and self._httpd_thread.is_alive()
+
+    def start(self) -> None:
+        """
+        Starts the daemon.
+        """
+        self.start_socketcan_servers()
+        self._httpd_thread = Thread(target=self._httpd.serve_forever, daemon=True)
+        self._httpd_thread.start()
+
+    def stop(self) -> None:
+        """
+        Stops the daemon thread.
+        """
+        for channel, server in self._servers.items():
+            _logger.info("Stopping socketcanserver on channel %s", channel)
+            server.stop()
+            if bus := server.bus:
+                bus.shutdown()
+
+    def __enter__(self) -> Self:
+        """
+        Starts the daemon on entering the context manager.
+        """
+        self.start()
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        """
+        Stops the daemon on exiting the context manager.
+        """
+        self.stop()
