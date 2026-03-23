@@ -7,6 +7,13 @@ Centralizes imports.
 
 from __future__ import annotations
 
-from ._server import BusParameters, ServerDirection, SocketcanServer
+from ._client import connect_socketcan_client
+from ._server import BusParameters, ServerDirection, SocketcanDaemon, SocketcanServer
 
-__all__ = ["BusParameters", "ServerDirection", "SocketcanServer"]
+__all__ = [
+    "BusParameters",
+    "ServerDirection",
+    "SocketcanDaemon",
+    "SocketcanServer",
+    "connect_socketcan_client",
+]

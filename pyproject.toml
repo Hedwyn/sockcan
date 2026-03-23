@@ -10,9 +10,10 @@ description = "Provides a socketcan-alike interface other arbitrary CAN drivers"
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [{ name = "Baptiste Pestourie" }]
-dependencies = ["click"]
+dependencies = []
 
 [project.optional-dependencies]
+examples = ["click"]
 test = ["hypothesis", "pytest", "python-can"]
 
 [project.urls]
