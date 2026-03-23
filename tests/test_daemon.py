@@ -7,11 +7,10 @@ Test suite for the socketcan server
 
 from __future__ import annotations
 
-from socket import socket
-import threading
 from typing import TYPE_CHECKING, Literal
 
 import pytest
+from can import Message
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
@@ -40,7 +39,18 @@ type SocketProvider = Literal["python-can", "sockcan"]
 @pytest.fixture
 def socketcan_server() -> Generator[SocketcanServer, None, None]:
     with vcan_bus() as bus:
-        yield SocketcanServer(bus)
+        server = SocketcanServer(bus)
+        yield server
+        server.stop()
+        server.join()
+
+
+@pytest.fixture
+def virtual_socketcan_server() -> Generator[SocketcanServer, None, None]:
+    server = SocketcanServer()
+    yield server
+    server.stop()
+    server.join()
 
 
 @given(can_messages=st.lists(can_messages(), min_size=10, max_size=100))
@@ -48,7 +58,6 @@ def socketcan_server() -> Generator[SocketcanServer, None, None]:
 def test_single_consumer_rx(
     can_messages: list[PyCanMessage],
     tx_can_bus: SocketcanBus,
-    socketcan_server: SocketcanServer,
 ) -> None:
     with vcan_bus() as rx_bus:
         socketcan_server = SocketcanServer(rx_bus)
@@ -62,6 +71,7 @@ def test_single_consumer_rx(
             assert obtained.data == msg.data
             assert obtained.arbitration_id == msg.arbitration_id
             assert obtained.is_extended_id is msg.is_extended_id
+    socketcan_server.stop()
 
 
 @given(can_messages=st.lists(can_messages(), min_size=10, max_size=100))
@@ -86,3 +96,45 @@ def test_single_consumer_tx(
             assert obtained.is_extended_id is msg.is_extended_id
     socketcan_server.stop()
     socketcan_server.join()
+
+
+@given(can_messages=st.lists(can_messages(), min_size=1, max_size=1))
+@settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=1)
+def test_virtual_socketcan_bus(
+    virtual_socketcan_server: SocketcanServer,
+    can_messages: list[PyCanMessage],
+) -> None:
+    virtual_socketcan_server = SocketcanServer()
+
+    conn_1 = virtual_socketcan_server.subscribe()
+
+    virtual_socketcan_server.start()
+    recv_fn_1 = build_recv_func(conn_1, use_native_timestamps=False)
+    send_fn_1 = build_send_func(conn_1, expects_msg_cls=True)
+
+    test_msg = can_messages[0]
+    send_fn_1(test_msg)
+    # expecting here to NOT receive our own message
+    conn_1.setblocking(False)  # noqa: FBT003
+    with pytest.raises(BlockingIOError):
+        conn_1.recv(1)
+    conn_1.setblocking(True)  # noqa: FBT003
+
+    conn_2 = virtual_socketcan_server.subscribe()
+    # conn_2.setblocking(False)  # noqa: FBT003
+    send_fn_2 = build_send_func(conn_2, expects_msg_cls=True)
+    recv_fn_2 = build_recv_func(conn_2, use_native_timestamps=False)
+
+    for msg in can_messages:
+        send_fn_1(msg)
+        obtained = recv_fn_2()
+        assert obtained.arbitration_id == msg.arbitration_id
+        assert obtained.data == msg.data
+        assert obtained.is_extended_id == msg.is_extended_id
+
+    for msg in can_messages:
+        send_fn_2(msg)
+        obtained = recv_fn_1()
+        assert obtained.arbitration_id == msg.arbitration_id
+        assert obtained.data == msg.data
+        assert obtained.is_extended_id == msg.is_extended_id

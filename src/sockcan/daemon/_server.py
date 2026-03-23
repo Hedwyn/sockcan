@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import socket
+import struct
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -23,10 +24,10 @@ from typing import TYPE_CHECKING, NamedTuple, Self, cast
 import can
 from can import BusState, Message
 
-from sockcan import SendFn, SocketcanFd, build_send_func
-from sockcan._protocol import build_recv_func
+from sockcan import SendFn, SocketcanFd, build_recv_func, build_send_func
 
 if TYPE_CHECKING:
+    from _typeshed import FileDescriptorLike
     from can import BusABC
 
 _logger = logging.getLogger(__name__)
@@ -62,6 +63,7 @@ class _Consumer(NamedTuple):
     """
 
     sender: SendFn
+    fd: FileDescriptorLike
     filters: set[int] | None
 
 
@@ -69,9 +71,12 @@ class SocketcanServer:
     """
     Listens to the CAN bus and dispatches the messages to all
     consumers that subscribed to the bus.
+
+    Note: returned sockets should not be set to non-blocking mode as it might
+    mess up with the internal selection logic.
     """
 
-    def __init__(self, bus: BusABC) -> None:
+    def __init__(self, bus: BusABC | None = None) -> None:
         """
         Wraps the passed `bus`. For interfaces that do not support concurrency
         (e.g. pcan windows), this object should be the only one accessing the real bus.
@@ -84,6 +89,13 @@ class SocketcanServer:
         self._running: bool = False
         self._threads: list[Thread] = []
         self._selector.register(self._kill_switch_rx, events=EVENT_READ, data=None)
+
+    @property
+    def is_virtual(self) -> bool:
+        """
+        Whether this bus is simulated.
+        """
+        return self._bus is None
 
     @property
     def running(self) -> bool:
@@ -103,7 +115,7 @@ class SocketcanServer:
         theirs = cast("SocketcanFd", _theirs)
         send_fn = build_send_func(ours, expects_msg_cls=False)
         recv_fn = build_recv_func(ours, use_native_timestamps=False)
-        self._consumers.append(_Consumer(send_fn, filters))
+        self._consumers.append(_Consumer(send_fn, ours, filters))
         self._selector.register(ours, events=EVENT_READ, data=recv_fn)
         return theirs
 
@@ -131,7 +143,7 @@ class SocketcanServer:
             raise RuntimeError("Already started")
         self._threads.clear()
         self._running = True
-        if direction != ServerDirection.TX_ONLY:
+        if direction != ServerDirection.TX_ONLY and not self.is_virtual:
             rx_thread = Thread(target=self.run_rx, daemon=True)
             rx_thread.start()
             self._threads.append(rx_thread)
@@ -168,13 +180,14 @@ class SocketcanServer:
             # this path can be taken when closing the bus handle
             # on user side.
             # It should only be considered an error if the bus is in an error state.
-            if self._bus.state == BusState.ERROR:
+            if self._bus is not None and self._bus.state == BusState.ERROR:
                 _logger.error("CAN bus server ended on can operation error: %s", exc)  # noqa: TRY400
 
     def _run_rx(self) -> None:
         """
         Listens forever to the bus and forwards messages to all consumers.
         """
+        assert self._bus is not None, "RX thread can only real in non-virtual mode"
         recv = self._bus.recv
         consumers = self._consumers
         while True:
@@ -183,7 +196,7 @@ class SocketcanServer:
             can_id = next_message.arbitration_id
             data = next_message.data
 
-            for sender, filters in consumers:
+            for sender, _, filters in consumers:
                 if filters and can_id not in filters:
                     continue
                 sender(can_id, data, next_message.is_extended_id)  # type: ignore[arg-type]
@@ -196,11 +209,12 @@ class SocketcanServer:
         """
         try:
             self._run_tx()
-        except can.CanOperationError as exc:
+
+        except (can.CanOperationError, struct.error) as exc:
             # this path can be taken when closing the bus handle
             # on user side.
             # It should only be considered an error if the bus is in an error state.
-            if self._bus.state == BusState.ERROR:
+            if self._bus and self._bus.state == BusState.ERROR:
                 _logger.error("CAN bus server ended on can operation error: %s", exc)  # noqa: TRY400
 
     def _run_tx(self) -> None:
@@ -209,14 +223,16 @@ class SocketcanServer:
         their messages to the bus.
         """
         selector = self._selector
-        bus_send = self._bus.send
+        bus_send = self._bus.send if self._bus else None
         kill_switch = self._kill_switch_rx
+        consumers = self._consumers
         while self._running:
             selector_events = selector.select(timeout=0.1)
             for key, _ in selector_events:
+                fileobj = key.fileobj
                 recv_fn = key.data
                 if recv_fn is None:
-                    assert key.fileobj is kill_switch, (
+                    assert fileobj is kill_switch, (
                         "Registered an object with None data that's not the kill switch"
                     )
                     assert kill_switch.recv(1) == b"0"
@@ -227,10 +243,19 @@ class SocketcanServer:
                     continue
 
                 msg = recv_fn()
-                py_can_msg = Message(
-                    arbitration_id=msg.arbitration_id,
-                    is_extended_id=msg.is_extended_id,
-                    data=msg.data,
-                )
-                bus_send(py_can_msg)
+                # short-circuiting messages between our consumers
+                for send_fn, fd, filters in consumers:
+                    _ = filters
+                    if fd is fileobj:
+                        # skipping, not sending to ourselves
+                        continue
+                    send_fn(msg.arbitration_id, msg.data, msg.is_extended_id)
+
+                if bus_send is not None:
+                    py_can_msg = Message(
+                        arbitration_id=msg.arbitration_id,
+                        is_extended_id=msg.is_extended_id,
+                        data=msg.data,
+                    )
+                    bus_send(py_can_msg)
         _logger.info("Stopping sender thread, we've got terminated")
