@@ -87,7 +87,7 @@ CAN_RAW = 1
 SOL_CAN_BASE = 100
 SOL_CAN_RAW = SOL_CAN_BASE + CAN_RAW
 CAN_RAW_RECV_OWN_MSGS = 4
-
+SOCKT_CAN_STRUCT_SIZE = 16
 SO_TIMESTAMPNS = 35
 CAN_EFF_FLAG = 0x80000000
 CAN_RAW_LOOPBACK = 3
@@ -214,7 +214,7 @@ def _socketcan_recv_stream(
     # to inject the constants in local scope and speed up their access.
     _header_unpack: HeaderUnpack = CAN_FRAME_HEADER_STRUCT.unpack_from,
     _time_fn: Callable[[], int] = time_ns,
-    _canfd_mtu: int = CANFD_MTU,
+    _msg_size: int = 16,
     _can_eff_flag: int = CAN_EFF_FLAG,
 ) -> CanMessage:
     """
@@ -226,13 +226,12 @@ def _socketcan_recv_stream(
         raise NotImplementedError
     # Fetching the Arb ID, DLC and Data
     try:
-        cf = recv_fn(_canfd_mtu)
-        # cf, ancillary_data, *_ = recv_fn(_canfd_mtu, _ancillary_data_size)
+        cf = recv_fn(_msg_size)
     except OSError as error:
         msg = f"Error receiving: {error.strerror}"
         raise exc_class(msg) from error
-
     can_id, can_dlc, _ = _header_unpack(cf)
+
     # Note: `'not not' is faster than bool
     is_extended = not not (can_id & _can_eff_flag)  # noqa: SIM208
     can_id = can_id & 0x1FFFFFFF
@@ -250,7 +249,10 @@ type RecvFn = Callable[[], CanMessage]
 
 
 def build_recv_func(
-    fd: SocketcanFd, *, use_native_timestamps: bool = True, is_stream: bool = False
+    fd: SocketcanFd,
+    *,
+    use_native_timestamps: bool = True,
+    is_stream: bool = False,
 ) -> RecvFn:
     """
     Builds the receive function for socketcan socket `fd`.
@@ -296,7 +298,8 @@ def _socketcan_send(
     using the socket send function `send_fn`
     """
     header = build_tx_header(arbitration_id, data.__len__(), is_extended_id=is_extended)
-    send_fn(header + data.ljust(8, b"\0"))
+    payload = header + data.ljust(8, b"\0")
+    send_fn(payload)
 
 
 def _socketcan_send_msg(

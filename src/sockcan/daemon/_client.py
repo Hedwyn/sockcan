@@ -60,7 +60,6 @@ def connect_socketcan_client(
     Raises ValueError if daemon returns a 400.
     """
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
     # 2. Connect to the server
     sock.connect((host, port))
     _logger.info("Connected to %s:%d", host, port)

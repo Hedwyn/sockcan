@@ -314,20 +314,6 @@ class SocketcanServer:
         _logger.info("Stopping sender thread, we've got terminated")
 
 
-class _UserError(Exception):
-    pass
-
-
-class SubscriptionHandler(BaseHTTPRequestHandler):
-    def __init__(
-        self,
-        on_subscribe: Callable[[str], None],
-        on_unsubscribe: Callable[[str], None],
-    ) -> None:
-        self.on_subscribe = on_subscribe
-        self.on_unsubscribe = on_unsubscribe
-
-
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
@@ -401,7 +387,7 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
                 sock = self.request
                 assert server.running, "Server should have been started already"
                 _logger.info("Listening to socket")
-                server.listen_to(sock)
+                server.listen_to(sock, is_stream=True)
                 _logger.info("Upgrading connection to socketcan")
                 # TODO: wait for socket to close
                 time.sleep(1000)
