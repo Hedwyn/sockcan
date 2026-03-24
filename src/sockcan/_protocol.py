@@ -43,6 +43,10 @@ class CanMessage:
     def __iter__(self) -> tuple[int, bytes, bool]:
         return (self.arbitration_id, self.data, self.is_extended_id)
 
+    def __str__(self) -> str:
+        payload = " ".join([f"{b:02x}" for b in self.data])
+        return f"{self.arbitration_id:08x}:{payload}"
+
 
 def get_received_ancillary_buf_size() -> int:
     """
@@ -146,6 +150,7 @@ type HeaderPack = Callable[[int, int, int], bytes]
 
 def _socketcan_recv(
     recv_fn: RecvMsgFn,
+    timeout: float | None = None,
     custom_mask: int = 0xFFFF_FFFF,
     exc_class: type[Exception] = OSError,
     # Note: all parameters below are injected as default arguments so they are accessed faster
@@ -164,6 +169,8 @@ def _socketcan_recv(
     Unpacks the data, arbitration ID and timestamp andf leaves all the other metadata undecoded.
     Metadata will only be decoded on access.
     """
+    if timeout is not None and timeout > 0.0:
+        raise NotImplementedError()
     # Fetching the Arb ID, DLC and Data
     try:
         cf, ancillary_data, *_ = recv_fn(_canfd_mtu, _ancillary_data_size)
