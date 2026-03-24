@@ -13,7 +13,7 @@ authors = [{ name = "Baptiste Pestourie" }]
 dependencies = []
 
 [project.optional-dependencies]
-examples = ["click"]
+daemon = ["click", "python-can"]
 test = ["hypothesis", "pytest", "python-can"]
 
 [project.urls]
