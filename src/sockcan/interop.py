@@ -151,15 +151,11 @@ class UserspaceSocketcanBus:
 
 def _hijack_python_can(
     bus_cls: type[FastSocketcanBus | UserspaceSocketcanBus] = FastSocketcanBus,
-    system: str | None = None,
 ) -> tuple[str, str] | None:
     """
     Swaps python-can socketcan's implementation by ours,
     and returns the overriden values so that they can be easily restored.
     """
-    system = system or platform.system()
-    if system == "Windows":
-        raise ValueError("Cannot use socketcan on Windows")
     # Registration format used by python-can is (import path, class name)
     former_factory = BACKENDS.get("socketcan", None)
     BACKENDS["socketcan"] = ("sockcan.interop", bus_cls.__name__)
@@ -243,20 +239,19 @@ def activate_userspace_socketcan(
             )
         daemon.start()
         atexit.register(daemon.stop)
-    _hijack_python_can(UserspaceSocketcanBus, system=system)
+    _hijack_python_can(UserspaceSocketcanBus)
 
 
 @contextmanager
 def override_python_can(
     bus_cls: type[FastSocketcanBus | UserspaceSocketcanBus] = FastSocketcanBus,
-    system: str | None = None,
 ) -> Generator[None, None, None]:
     """
     Overrides python-can's implementation with `FastSocketcanBus` as part of this
     context manager scope only.
     Use `hijack_python_can` to do it permanently
     """
-    former_factory = _hijack_python_can(bus_cls, system=system)
+    former_factory = _hijack_python_can(bus_cls)
     try:
         yield
     finally:
@@ -275,7 +270,10 @@ def hijack_python_can(
     based projects with a one-liner - or as a way to optimize the Linux implementation
     in a multi-platform project, while keeping the convenience / abstraction layer of python-can.
     """
-    _ = _hijack_python_can(bus_cls=FastSocketcanBus, system=system)
+    system = system or platform.system()
+    if system == "Windows":
+        raise ValueError("Cannot use socketcan on Windows")
+    _ = _hijack_python_can(bus_cls=FastSocketcanBus)
 
 
 type ServerMode = Literal["local", "daemon"]
