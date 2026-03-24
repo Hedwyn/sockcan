@@ -169,8 +169,8 @@ def _socketcan_recv(
     Unpacks the data, arbitration ID and timestamp andf leaves all the other metadata undecoded.
     Metadata will only be decoded on access.
     """
-    if timeout is not None and timeout > 0.0:
-        raise NotImplementedError()
+    if timeout is not None and timeout > 0:
+        raise NotImplementedError
     # Fetching the Arb ID, DLC and Data
     try:
         cf, ancillary_data, *_ = recv_fn(_canfd_mtu, _ancillary_data_size)
@@ -200,14 +200,65 @@ def _socketcan_recv(
     return CanMessage(can_id, data, is_extended, timestamp)
 
 
+type _RecvFn = Callable[[int], bytes]
+
+
+def _socketcan_recv_stream(
+    recv_fn: _RecvFn,
+    timeout: float | None = None,
+    custom_mask: int = 0xFFFF_FFFF,
+    exc_class: type[Exception] = OSError,
+    # Note: all parameters below are injected as default arguments so they are accessed faster
+    # they are not meants to be overriden, hence the prefix '__'
+    # Warning: these defaulted parameters are mainly there
+    # to inject the constants in local scope and speed up their access.
+    _header_unpack: HeaderUnpack = CAN_FRAME_HEADER_STRUCT.unpack_from,
+    _time_fn: Callable[[], int] = time_ns,
+    _canfd_mtu: int = CANFD_MTU,
+    _can_eff_flag: int = CAN_EFF_FLAG,
+) -> CanMessage:
+    """
+    Captures a message from the CAN bus and runs partial decoding.
+    Unpacks the data, arbitration ID and timestamp andf leaves all the other metadata undecoded.
+    Metadata will only be decoded on access.
+    """
+    if timeout is not None and timeout > 0:
+        raise NotImplementedError
+    # Fetching the Arb ID, DLC and Data
+    try:
+        cf = recv_fn(_canfd_mtu)
+        # cf, ancillary_data, *_ = recv_fn(_canfd_mtu, _ancillary_data_size)
+    except OSError as error:
+        msg = f"Error receiving: {error.strerror}"
+        raise exc_class(msg) from error
+
+    can_id, can_dlc, _ = _header_unpack(cf)
+    # Note: `'not not' is faster than bool
+    is_extended = not not (can_id & _can_eff_flag)  # noqa: SIM208
+    can_id = can_id & 0x1FFFFFFF
+
+    data = cf[8 : 8 + can_dlc]
+    can_id = can_id & custom_mask
+
+    timestamp = _time_fn() * 1e-9
+
+    # updating data
+    return CanMessage(can_id, data, is_extended, timestamp)
+
+
 type RecvFn = Callable[[], CanMessage]
 
 
-def build_recv_func(fd: SocketcanFd, *, use_native_timestamps: bool = True) -> RecvFn:
+def build_recv_func(
+    fd: SocketcanFd, *, use_native_timestamps: bool = True, is_stream: bool = False
+) -> RecvFn:
     """
     Builds the receive function for socketcan socket `fd`.
     """
     ancillary_data_size = get_received_ancillary_buf_size() if use_native_timestamps else 0
+    if is_stream:
+        return partial(_socketcan_recv_stream, fd.recv)
+
     return partial(_socketcan_recv, fd.recvmsg, _ancillary_data_size=ancillary_data_size)
 
 

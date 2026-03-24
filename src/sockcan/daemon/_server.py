@@ -118,9 +118,19 @@ class SocketcanServer:
         """
         return self._running
 
-    def listen_to(self, fd: SocketcanFd, filters: set[int] | None = None) -> None:
+    def listen_to(
+        self,
+        fd: SocketcanFd,
+        filters: set[int] | None = None,
+        *,
+        is_stream: bool = False,
+    ) -> None:
         send_fn = build_send_func(fd, expects_msg_cls=False)
-        recv_fn = build_recv_func(fd, use_native_timestamps=self.use_native_timestamps)
+        recv_fn = build_recv_func(
+            fd,
+            use_native_timestamps=self.use_native_timestamps,
+            is_stream=is_stream,
+        )
         self._consumers.append(_Consumer(send_fn, fd, filters))
         self._selector.register(fd, events=EVENT_READ, data=recv_fn)
         if self.running:
@@ -133,7 +143,7 @@ class SocketcanServer:
         with socketcan protocol.
         If filters is passed, only messages with requested filters will be forwarded.
         """
-        _ours, _theirs = socket.socketpair()
+        _ours, _theirs = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
         ours = cast("SocketcanFd", _ours)
         theirs = cast("SocketcanFd", _theirs)
         self.listen_to(ours, filters=filters)
@@ -227,6 +237,7 @@ class SocketcanServer:
                 sender, _, filters = consumer
                 if filters and can_id not in filters:
                     continue
+
                 try:
                     sender(can_id, data, next_message.is_extended_id)  # type: ignore[arg-type]
                 except BrokenPipeError:
@@ -290,9 +301,7 @@ class SocketcanServer:
                         continue
                     try:
                         send_fn(msg.arbitration_id, msg.data, msg.is_extended_id)
-                    except BrokenPipeError:
-                        _logger.info("Client closed connection")
-                        # TODO: should we remove consumer here ?
+                    except (BrokenPipeError, ConnectionResetError):
                         continue
 
                 if bus_send is not None:
