@@ -151,7 +151,6 @@ type HeaderPack = Callable[[int, int, int], bytes]
 def _socketcan_recv(
     recv_fn: RecvMsgFn,
     timeout: float | None = None,
-    custom_mask: int = 0xFFFF_FFFF,
     exc_class: type[Exception] = OSError,
     # Note: all parameters below are injected as default arguments so they are accessed faster
     # they are not meants to be overriden, hence the prefix '__'
@@ -185,7 +184,6 @@ def _socketcan_recv(
     can_id = can_id & 0x1FFFFFFF
 
     data = cf[8 : 8 + can_dlc]
-    can_id = can_id & custom_mask
 
     if _ancillary_data_size > 0:
         assert ancillary_data, "ancillary data was not enabled on the socket"
@@ -206,7 +204,6 @@ type _RecvFn = Callable[[int], bytes]
 def _socketcan_recv_stream(
     recv_fn: _RecvFn,
     timeout: float | None = None,
-    custom_mask: int = 0xFFFF_FFFF,
     exc_class: type[Exception] = OSError,
     # Note: all parameters below are injected as default arguments so they are accessed faster
     # they are not meants to be overriden, hence the prefix '__'
@@ -237,7 +234,6 @@ def _socketcan_recv_stream(
     can_id = can_id & 0x1FFFFFFF
 
     data = cf[8 : 8 + can_dlc]
-    can_id = can_id & custom_mask
 
     timestamp = _time_fn() * 1e-9
 
