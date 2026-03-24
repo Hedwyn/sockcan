@@ -10,7 +10,8 @@ from __future__ import annotations
 import atexit
 import platform
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Self
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal, Self
 
 import can
 from can.interfaces import BACKENDS
@@ -18,8 +19,8 @@ from can.typechecking import CanFilter
 
 from sockcan import connect_to_socketcan
 from sockcan._protocol import SocketcanConfig, SocketcanFd, build_recv_func, build_send_func
-from sockcan.daemon import SocketcanServer
-from sockcan.daemon._server import BusParameters
+from sockcan.daemon import SocketcanServer, connect_socketcan_client, ping_daemon
+from sockcan.daemon._server import BusParameters, SocketcanDaemon, ensure_socketcan_daemon_running
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -63,7 +64,28 @@ class FastSocketcanBus:
         self.socket.close()
 
 
-_global_socketcan_server: SocketcanServer | None = None
+@dataclass
+class SocketcanDaemonConfig:
+    """
+    Used to define parameters whenever overriding python-can,
+    as this is inherently global.
+    If mode is `local`, userspace socketcan buses
+    will use the a local thread.
+    """
+
+    mode: ServerMode = "local"
+    allow_run_daemon_locally: bool = True
+    host: str = "localhost"
+    port: int = 8000
+    local_server: SocketcanServer | None = None
+    local_daemon: SocketcanDaemon | None = None
+    linux_too: bool = False
+    use_native_timestamps: bool = False
+
+
+# --- Globals- required to inject this implementation into python-can --- #
+_global_config = SocketcanDaemonConfig()
+_local_servers: dict[str, SocketcanServer] = {}
 
 
 class UserspaceSocketcanBus:
@@ -84,15 +106,34 @@ class UserspaceSocketcanBus:
         # Note: actual socket is kept under .socket in SocketcanBus
         self._config = SocketcanConfig(channel=str(channel))
         if socket is None:
-            if _global_socketcan_server is None:
-                raise RuntimeError(
-                    "You must pass a socket as there isn't one in the current context",
-                )
-            # TODO: filters
-            socket = _global_socketcan_server.subscribe()
+            assert isinstance(channel, str)
+            socket = self._get_socket(channel)
         self.socket = socket
         self.send = build_send_func(self.socket, expects_msg_cls=True)
         self.recv = build_recv_func(self.socket, use_native_timestamps=False)
+
+    def fileno(self) -> int:
+        return self.socket.fileno()
+
+    def shutdown(self) -> None:
+        self.socket.close()
+
+    @classmethod
+    def _get_socket(cls, channel: str) -> SocketcanFd:
+        if _global_config.mode == "local":
+            target_server = _local_servers.get(channel)
+            if target_server is None:
+                raise RuntimeError(f"Socketcanserver is not started on channel {channel}")
+            return target_server.subscribe()
+
+        # daemon mode
+        if not ping_daemon(_global_config.host, _global_config.port):
+            raise RuntimeError(
+                "Daemon mode is used, but no daemon is running."
+                "If you were intending to run daemon locally, "
+                "use `ensure_socketcan_daemon_running()`",
+            )
+        return connect_socketcan_client(_global_config.host, _global_config.port, channel)
 
     def __enter__(self) -> Self:
         """
@@ -108,7 +149,10 @@ class UserspaceSocketcanBus:
         self.socket.close()
 
 
-def _hijack_python_can(*, system: str | None = None) -> tuple[str, str]:
+def _hijack_python_can(
+    bus_cls: type[FastSocketcanBus | UserspaceSocketcanBus] = FastSocketcanBus,
+    system: str | None = None,
+) -> tuple[str, str] | None:
     """
     Swaps python-can socketcan's implementation by ours,
     and returns the overriden values so that they can be easily restored.
@@ -117,63 +161,12 @@ def _hijack_python_can(*, system: str | None = None) -> tuple[str, str]:
     if system == "Windows":
         raise ValueError("Cannot use socketcan on Windows")
     # Registration format used by python-can is (import path, class name)
-    former_factory = BACKENDS["socketcan"]
-    BACKENDS["socketcan"] = ("sockcan.interop", "FastSocketcanBus")
+    former_factory = BACKENDS.get("socketcan", None)
+    BACKENDS["socketcan"] = ("sockcan.interop", bus_cls.__name__)
     return former_factory
 
 
-@contextmanager
-def override_python_can(*, system: str | None = None) -> Generator[None, None, None]:
-    """
-    Overrides python-can's implementation with `FastSocketcanBus` as part of this
-    context manager scope only.
-    Use `hijack_python_can` to do it permanently
-    """
-    former_factory = _hijack_python_can(system=system)
-    try:
-        yield
-    finally:
-        BACKENDS["socketcan"] = former_factory
-
-
-def hijack_python_can(*, system: str | None = None) -> None:
-    """
-    WARNING: mutating global shared state here.
-
-    Overrides python-can's implementation with `FastSocketcanBus`
-    Can be used as a way to use ot test this implementation in projects python-can
-    based projects with a one-liner - or as a way to optimize the Linux implementation
-    in a multi-platform project, while keeping the convenience / abstraction layer of python-can.
-    """
-    _ = _hijack_python_can(system=system)
-
-
-def use_virtual_socketcan(
-    bus_parameters: BusParameters | None = None,
-    system: str | None = None,
-    *,
-    windows_only: bool = True,
-) -> None:
-    global _global_socketcan_server
-    """
-    WARNING: mutating global shared state here.  
-    Allows using virtual socketcan on Windows.
-    Starts a socketcanserver running on the real CAN interface
-    defined by `bus_parameters`.
-    Then injects a compatible socketcan implementation 
-    in python-can's backend.
-    Resources will be released on interpreter exit.
-    """
-    if _global_socketcan_server is not None and _global_socketcan_server.running:
-        raise RuntimeError("Socketcanserver is already up and running")
-
-    system = system or platform.system()
-    if system != "Windows" and not windows_only:
-        raise RuntimeError(
-            "Not running on Windows, native socketcan should be used instead of virtual."
-            "Disable `windows_only` if that's deliberate",
-        )
-
+def _init_global_server(bus_parameters: BusParameters | None = None) -> SocketcanServer:
     bus_parameters = bus_parameters or BusParameters()
     bus = can.Bus(
         interface=bus_parameters.interface,
@@ -185,4 +178,104 @@ def use_virtual_socketcan(
     server = SocketcanServer(bus)
     server.start()
     atexit.register(server.stop)
-    _global_socketcan_server = server
+    return server
+
+
+def activate_userspace_socketcan(
+    parameters: BusParameters | list[BusParameters] | None,
+    config: SocketcanDaemonConfig | None = None,
+    *,
+    system: str | None = None,
+) -> None:
+    """
+    WARNING: mutating global shared state here.
+    Allows using virtual socketcan on Windows.
+    Starts a socketcanserver running on the real CAN interface
+    defined by `bus_parameters`.
+    Then injects a compatible socketcan implementation
+    in python-can's backend.
+    Resources will be released on interpreter exit.
+    """
+    global _global_config
+    config = config or _global_config
+    _global_config = config
+    system = system or platform.system()
+
+    if system == "Linux" and not config.linux_too:
+        raise RuntimeError(
+            "Tried to enable userspace on Linux which supports socketcan natively."
+            "If that's deliberate, enable `linux_too` in your config",
+        )
+
+    if system == "Windows" and config.use_native_timestamps:
+        raise ValueError(
+            "Native timestamps are not supported on windows."
+            "Disable `use_native_timestamps` in your config",
+        )
+    if parameters is None:
+        parameters = [BusParameters()]
+
+    elif isinstance(parameters, BusParameters):
+        parameters = [parameters]
+
+    if config.mode == "local":
+        for params in parameters:
+            channel = params.channel
+            if channel in _local_servers:
+                raise RuntimeError(f"A server is already started for channel {channel}")
+            server = _init_global_server(params)
+            _local_servers[channel] = server
+
+    elif config.mode == "daemon" and not ping_daemon(config.host, config.port):
+        if not config.allow_run_daemon_locally:
+            raise RuntimeError(
+                "Daemon did not reply, and running daemon locally is disabled in config. "
+                "If you want to run daemon locally, enabel `allow_run_daemon_locally`"
+            )
+
+        daemon = SocketcanDaemon(config.host, config.port)
+        for params in parameters:
+            daemon.register_bus(
+                channel=params.channel,
+                interface=params.interface,
+                bitrate=params.bitrate,
+                use_native_timestamps=config.use_native_timestamps,
+            )
+        daemon.start()
+        atexit.register(daemon.stop)
+    _hijack_python_can(UserspaceSocketcanBus, system=system)
+
+
+@contextmanager
+def override_python_can(
+    bus_cls: type[FastSocketcanBus | UserspaceSocketcanBus] = FastSocketcanBus,
+    system: str | None = None,
+) -> Generator[None, None, None]:
+    """
+    Overrides python-can's implementation with `FastSocketcanBus` as part of this
+    context manager scope only.
+    Use `hijack_python_can` to do it permanently
+    """
+    former_factory = _hijack_python_can(bus_cls, system=system)
+    try:
+        yield
+    finally:
+        if former_factory:
+            BACKENDS["socketcan"] = former_factory
+
+
+def hijack_python_can(
+    system: str | None = None,
+) -> None:
+    """
+    WARNING: mutating global shared state here.
+
+    Overrides python-can's implementation with `FastSocketcanBus`
+    Can be used as a way to use ot test this implementation in projects python-can
+    based projects with a one-liner - or as a way to optimize the Linux implementation
+    in a multi-platform project, while keeping the convenience / abstraction layer of python-can.
+    """
+    _ = _hijack_python_can(bus_cls=FastSocketcanBus, system=system)
+
+
+type ServerMode = Literal["local", "daemon"]
