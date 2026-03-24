@@ -10,6 +10,7 @@ For interfaces like pcan on Windows, this also allows concurrent connection on t
 
 from __future__ import annotations
 
+import atexit
 import logging
 import os
 import socket
@@ -19,7 +20,7 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum, auto
-from functools import partial
+from functools import cache, partial
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from selectors import EVENT_READ, DefaultSelector
 from socketserver import ThreadingMixIn
@@ -31,6 +32,8 @@ import can
 from can import BusState, Message
 
 from sockcan import SendFn, SocketcanFd, build_recv_func, build_send_func
+
+from ._client import ping_daemon
 
 if TYPE_CHECKING:
     from _typeshed import FileDescriptorLike
@@ -82,7 +85,7 @@ class SocketcanServer:
     mess up with the internal selection logic.
     """
 
-    def __init__(self, bus: BusABC | None = None) -> None:
+    def __init__(self, bus: BusABC | None = None, *, use_native_timestamps: bool = False) -> None:
         """
         Wraps the passed `bus`. For interfaces that do not support concurrency
         (e.g. pcan windows), this object should be the only one accessing the real bus.
@@ -94,6 +97,7 @@ class SocketcanServer:
         self._kill_switch_rx, self._kill_switch_tx = socket.socketpair()
         self._running: bool = False
         self._threads: list[Thread] = []
+        self.use_native_timestamps = use_native_timestamps
         self._selector.register(self._kill_switch_rx, events=EVENT_READ, data=None)
 
     @property
@@ -116,7 +120,7 @@ class SocketcanServer:
 
     def listen_to(self, fd: SocketcanFd, filters: set[int] | None = None) -> None:
         send_fn = build_send_func(fd, expects_msg_cls=False)
-        recv_fn = build_recv_func(fd, use_native_timestamps=False)
+        recv_fn = build_recv_func(fd, use_native_timestamps=self.use_native_timestamps)
         self._consumers.append(_Consumer(send_fn, fd, filters))
         self._selector.register(fd, events=EVENT_READ, data=recv_fn)
         if self.running:
@@ -207,16 +211,27 @@ class SocketcanServer:
         assert self._bus is not None, "RX thread can only real in non-virtual mode"
         recv = self._bus.recv
         consumers = self._consumers
+        closed_connections: list[_Consumer] = []
         while True:
+            if closed_connections:
+                for consumer in closed_connections:
+                    consumers.remove(consumer)
+                closed_connections.clear()
+
             next_message = recv()
             assert next_message is not None
             can_id = next_message.arbitration_id
             data = next_message.data
 
-            for sender, _, filters in consumers:
+            for consumer in consumers:
+                sender, _, filters = consumer
                 if filters and can_id not in filters:
                     continue
-                sender(can_id, data, next_message.is_extended_id)  # type: ignore[arg-type]
+                try:
+                    sender(can_id, data, next_message.is_extended_id)  # type: ignore[arg-type]
+                except BrokenPipeError:
+                    _logger.info("Client closed connection")
+                    closed_connections.append(consumer)
 
     def run_tx(self) -> None:
         """
@@ -260,14 +275,25 @@ class SocketcanServer:
                     # are registered or unregistered
                     continue
 
-                msg = recv_fn()
+                try:
+                    msg = recv_fn()
+                except struct.error:
+                    _logger.info("Bus closed")
+                    selector.unregister(key.fileobj)
+                    continue
+
                 # short-circuiting messages between our consumers
                 for send_fn, fd, filters in consumers:
                     _ = filters
                     if fd is fileobj:
                         # skipping, not sending to ourselves
                         continue
-                    send_fn(msg.arbitration_id, msg.data, msg.is_extended_id)
+                    try:
+                        send_fn(msg.arbitration_id, msg.data, msg.is_extended_id)
+                    except BrokenPipeError:
+                        _logger.info("Client closed connection")
+                        # TODO: should we remove consumer here ?
+                        continue
 
                 if bus_send is not None:
                     py_can_msg = Message(
@@ -305,10 +331,10 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
     Use /subscribe endpoint (with channel?=channel_name) to get a socket.
     """
 
-    def __init__(self, url: str = "localhost", port: int = 8000) -> None:
+    def __init__(self, host: str = "localhost", port: int = 8000) -> None:
         self._port = port
-        self._url = url
-        self._httpd = ThreadedHTTPServer((url, port), partial(self._RequestHandler, daemon=self))
+        self._host = host
+        self._httpd = ThreadedHTTPServer((host, port), partial(self._RequestHandler, daemon=self))
 
         self._httpd_thread: Thread | None = None
         self._servers: dict[str, SocketcanServer] = {}
@@ -340,7 +366,6 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
             params = parse_qs(parsed_url.query)
 
             if path == "/ping":
-                print("Received ping")
                 self.send_response_and_content(str(os.getpid()))
                 return
 
@@ -400,12 +425,19 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
         if self.is_running:
             virtual_server.start()
 
-    def register_bus(self, channel: str, interface: str, bitrate: int = 500_000) -> None:
+    def register_bus(
+        self,
+        channel: str,
+        interface: str,
+        bitrate: int = 500_000,
+        *,
+        use_native_timestamps: bool = False,
+    ) -> None:
         """
         Registers the parameters for a new bus that should be managed by this daemon.
         """
         bus = can.Bus(interface=interface, channel=channel, bitrate=bitrate)
-        server = SocketcanServer(bus)
+        server = SocketcanServer(bus, use_native_timestamps=use_native_timestamps)
         self._servers[channel] = server
 
     def start_socketcan_servers(self) -> None:
@@ -431,7 +463,7 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
         """
         The URL to which the HTTP server is bound.
         """
-        return self._url
+        return self._host
 
     @property
     def is_running(self) -> bool:
@@ -444,6 +476,7 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
         """
         Starts the daemon.
         """
+        _logger.info("Starting socketcan daemon on %s:%d", self._host, self._port)
         self.start_socketcan_servers()
         self._httpd_thread = Thread(target=self._httpd.serve_forever, daemon=True)
         self._httpd_thread.start()
@@ -470,3 +503,21 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
         Stops the daemon on exiting the context manager.
         """
         self.stop()
+
+
+@cache
+def start_daemon_globally(host: str = "localhost", port: int = 8000) -> SocketcanDaemon:
+    daemon = SocketcanDaemon(host=host, port=port)
+    daemon.start()
+    atexit.register(daemon.stop)
+    return daemon
+
+
+def ensure_socketcan_daemon_running(
+    host: str = "localhost",
+    port: int = 8000,
+) -> SocketcanDaemon | None:
+    if ping_daemon(host, port):
+        _logger.info("Daemon is already run by another process, no need to start it here")
+        return None
+    return start_daemon_globally()
