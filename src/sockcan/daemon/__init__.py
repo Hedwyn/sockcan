@@ -7,7 +7,7 @@ Centralizes imports.
 
 from __future__ import annotations
 
-from ._client import connect_socketcan_client
+from ._client import connect_socketcan_client, ping_daemon
 from ._server import BusParameters, ServerDirection, SocketcanDaemon, SocketcanServer
 
 __all__ = [
@@ -16,4 +16,5 @@ __all__ = [
     "SocketcanDaemon",
     "SocketcanServer",
     "connect_socketcan_client",
+    "ping_daemon",
 ]
