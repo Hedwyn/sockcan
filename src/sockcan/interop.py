@@ -110,7 +110,11 @@ class UserspaceSocketcanBus:
             socket = self._get_socket(channel)
         self.socket = socket
         self.send = build_send_func(self.socket, expects_msg_cls=True)
-        self.recv = build_recv_func(self.socket, use_native_timestamps=False)
+        self.recv = build_recv_func(
+            self.socket,
+            use_native_timestamps=False,
+            is_stream=_global_config.mode == "daemon",
+        )
 
     def fileno(self) -> int:
         return self.socket.fileno()
