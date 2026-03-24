@@ -13,6 +13,7 @@ import click
 
 from sockcan import build_recv_func
 from sockcan.daemon import SocketcanDaemon, connect_socketcan_client
+from sockcan.daemon._client import ping_daemon
 
 
 @click.group()
@@ -67,6 +68,20 @@ def client(*, host_ip: str, port: int) -> None:
         payload = [f"{i:02x}" for i in next_msg.data]
         payload_str = " ".join(payload)
         click.echo(f"{next_msg.arbitration_id:08x}: {payload_str}")
+
+
+@daemon.command()
+@click.option("-ip", "--host-ip", default="localhost", type=str)
+@click.option("-p", "--port", default=8000, type=int)
+def ping(*, host_ip: str, port: int) -> None:
+    """
+    Connects the daemon and show all received CAN messages.
+    """
+    logging.basicConfig(level=logging.INFO)
+    if ping_daemon(host_ip, port):
+        click.echo(f"Daemon is running on {host_ip}:{port}")
+    else:
+        click.echo("Daemon is not running")
 
 
 if __name__ == "__main__":

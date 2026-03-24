@@ -11,6 +11,7 @@ For interfaces like pcan on Windows, this also allows concurrent connection on t
 from __future__ import annotations
 
 import logging
+import os
 import socket
 import struct
 import time
@@ -27,8 +28,7 @@ from typing import TYPE_CHECKING, NamedTuple, Self, cast
 from urllib.parse import parse_qs, urlparse
 
 import can
-from can import Bus, BusState, Message
-from can.typechecking import Channel
+from can import BusState, Message
 
 from sockcan import SendFn, SocketcanFd, build_recv_func, build_send_func
 
@@ -285,7 +285,9 @@ class _UserError(Exception):
 
 class SubscriptionHandler(BaseHTTPRequestHandler):
     def __init__(
-        self, on_subscribe: Callable[[str], None], on_unsubscribe: Callable[[str], None]
+        self,
+        on_subscribe: Callable[[str], None],
+        on_unsubscribe: Callable[[str], None],
     ) -> None:
         self.on_subscribe = on_subscribe
         self.on_unsubscribe = on_unsubscribe
@@ -336,6 +338,11 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
             parsed_url = urlparse(self.path)
             path = parsed_url.path
             params = parse_qs(parsed_url.query)
+
+            if path == "/ping":
+                print("Received ping")
+                self.send_response_and_content(str(os.getpid()))
+                return
 
             # Extract 'channel' parameter
             channel = params.get("channel", [None])[0]

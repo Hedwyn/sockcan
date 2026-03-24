@@ -20,6 +20,34 @@ _logger = logging.getLogger(__name__)
 HTTP_DELIMITER = "\r\n"
 
 
+def ping_daemon(
+    host: str = "localhost",
+    port: int = 8000,
+) -> bool:
+    """
+    Tries pinging the daemon and return whether it's currently running.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.connect((host, port))
+    except ConnectionRefusedError:
+        _logger.info("No service running at %s:%d", host, port)
+        return False
+
+    ping_request = (
+        HTTP_DELIMITER.join([
+            "GET /ping HTTP/1.1",
+            f"Host: {host}:{port}",
+            "Connection: close",
+        ])
+        + 2 * HTTP_DELIMITER
+    )
+    sock.sendall(ping_request.encode("utf-8"))
+    response = sock.recv(4096)
+    _logger.info("Ping response %s", response)
+    return b"200 OK" in response
+
+
 def connect_socketcan_client(
     host: str = "localhost",
     port: int = 8000,
@@ -40,7 +68,7 @@ def connect_socketcan_client(
     # 3. Construct the HTTP Upgrade Request
     upgrade_request = (
         HTTP_DELIMITER.join([
-            f"GET /subscribe?channel={channel} HTTP/1.1\r\n",
+            f"GET /subscribe?channel={channel} HTTP/1.1{HTTP_DELIMITER}",
             f"Host: {host}:{port}",
             "Connection: Upgrade",
             "Upgrade: socketcan",
