@@ -179,7 +179,7 @@ class SocketcanServer:
         """
         if not self._running:
             return
-        self._kill_switch_rx.send(b"0")
+        self._kill_switch_tx.send(b"0")
         self._running = False
 
     def join(self) -> None:
@@ -259,7 +259,7 @@ class SocketcanServer:
         kill_switch = self._kill_switch_rx
         consumers = self._consumers
         while self._running:
-            selector_events = selector.select(timeout=0.1)
+            selector_events = selector.select()
             for key, _ in selector_events:
                 fileobj = key.fileobj
                 recv_fn = key.data
@@ -277,7 +277,7 @@ class SocketcanServer:
 
                 try:
                     msg = recv_fn()
-                except struct.error:
+                except (struct.error, ConnectionResetError):
                     _logger.info("Bus closed")
                     selector.unregister(key.fileobj)
                     continue
