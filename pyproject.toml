@@ -15,6 +15,7 @@ dependencies = []
 [project.optional-dependencies]
 daemon = ["click", "python-can"]
 test = ["hypothesis", "pytest", "python-can"]
+docs = ["mkdocs", "mkdocs-material"]
 
 [project.urls]
 Homepage = "https://github.com/Hedwyn/sockcan"
