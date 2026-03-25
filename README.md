@@ -2,6 +2,16 @@
 
 Provides a socketcan-alike interface other arbitrary CAN drivers.
 
+## Installing
+
+```
+pip install sockcan
+```
+
+## Documentation
+
+Documentation is available [here](https://Hedwyn.github.io/sockcan/).
+
 ## Running benchmarks
 
 Benchmarks can be run with `python -m sockcan.benchmarks`:
