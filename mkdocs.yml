@@ -1,0 +1,25 @@
+site_name: Sockcan
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+
+nav:
+  - Home: index.md
+  - Explanation:
+      - "Overview": explanation/overview.md
+      - "What is Sockcan?": explanation/index.md
+      - "Core Concepts": explanation/core_concepts.md
+  - How-to Guides:
+      - "Basic Usage": how-to-guides/basic_usage.md
+  - Tutorials:
+      - "Getting Started": tutorials/getting_started.md
+      - "Virtual CAN on Windows": tutorials/virtual_can.md
+      - "Windows Setup": tutorials/windows_setup.md
+
+theme: material
