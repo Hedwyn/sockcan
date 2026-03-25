@@ -1,0 +1,1257 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>API Reference - Sockcan</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#api-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Sockcan" class="md-header__button md-logo" aria-label="Sockcan" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Sockcan
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              API Reference
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Sockcan" class="md-nav__button md-logo" aria-label="Sockcan" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Sockcan
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Explanation
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Explanation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/index.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    What is Sockcan?
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../explanation/core_concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Core Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How-to Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How-to Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../how-to-guides/basic_usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Basic Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/getting_started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/virtual_can/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Virtual CAN on Windows
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/windows_setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Windows Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#core-functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Core Functions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Core Functions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#connect_to_socketcanconfig-socketcanconfig-socketcanfd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        connect_to_socketcan(config: SocketcanConfig) -&gt; SocketcanFd
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#build_send_funcfd-socketcanfd-expects_msg_cls-bool-false-sendfn-messagesendfn" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        build_send_func(fd: SocketcanFd, *, expects_msg_cls: bool = False) -&gt; SendFn | MessageSendFn
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#build_recv_funcfd-socketcanfd-use_native_timestamps-bool-true-is_stream-bool-false-recvfn" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        build_recv_func(fd: SocketcanFd, *, use_native_timestamps: bool = True, is_stream: bool = False) -&gt; RecvFn
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-classes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data Classes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Data Classes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#socketcanconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SocketcanConfig
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#canmessage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CanMessage
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#loopbackmode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LoopbackMode
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#daemon-classes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Daemon Classes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Daemon Classes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#socketcanserver" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SocketcanServer
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#socketcandaemon" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SocketcanDaemon
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#busparameters" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        BusParameters
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#serverdirection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ServerDirection
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#interoperability-functions-python-can-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Interoperability Functions (python-can Integration)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Interoperability Functions (python-can Integration)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#hijack_python_cansystem-str-none-none-none" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        hijack_python_can(system: str | None = None) -&gt; None
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#override_python_canbus_cls-typefastsocketcanbus-userspacesocketcanbus-fastsocketcanbus-contextmanager" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        override_python_can(bus_cls: type[FastSocketcanBus | UserspaceSocketcanBus] = FastSocketcanBus) -&gt; contextmanager
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#activate_userspace_socketcanparameters-confignone-systemnone-none" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        activate_userspace_socketcan(parameters, config=None, *, system=None) -&gt; None
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fastsocketcanbus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FastSocketcanBus
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#userspacesocketcanbus" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UserspaceSocketcanBus
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#socketcandaemonconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SocketcanDaemonConfig
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="api-reference">API Reference</h1>
+<h2 id="core-functions">Core Functions</h2>
+<h3 id="connect_to_socketcanconfig-socketcanconfig-socketcanfd"><code>connect_to_socketcan(config: SocketcanConfig) -&gt; SocketcanFd</code></h3>
+<p>Creates a socketcan socket according to the provided configuration.</p>
+<p><strong>Parameters:</strong>
+- <code>config</code> (<code>SocketcanConfig</code>): Configuration for the CAN connection</p>
+<p><strong>Returns:</strong>
+- <code>SocketcanFd</code>: A socket configured for CAN communication</p>
+<p><strong>Example:</strong>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">sockcan</span><span class="w"> </span><span class="kn">import</span> <span class="n">SocketcanConfig</span><span class="p">,</span> <span class="n">connect_to_socketcan</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SocketcanConfig</span><span class="p">(</span><span class="n">channel</span><span class="o">=</span><span class="s2">&quot;can0&quot;</span><span class="p">)</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="n">sock</span> <span class="o">=</span> <span class="n">connect_to_socketcan</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+</span></code></pre></div></p>
+<hr />
+<h3 id="build_send_funcfd-socketcanfd-expects_msg_cls-bool-false-sendfn-messagesendfn"><code>build_send_func(fd: SocketcanFd, *, expects_msg_cls: bool = False) -&gt; SendFn | MessageSendFn</code></h3>
+<p>Builds a send function for the given socket.</p>
+<p><strong>Parameters:</strong>
+- <code>fd</code> (<code>SocketcanFd</code>): The socket to send messages on
+- <code>expects_msg_cls</code> (<code>bool</code>): If <code>True</code>, the function accepts <code>CanMessageProtocol</code> objects; otherwise accepts <code>arbitration_id</code>, <code>data</code>, and <code>is_extended</code> separately</p>
+<p><strong>Returns:</strong>
+- <code>SendFn</code>: A function accepting <code>(arbitration_id, data, is_extended)</code> if <code>expects_msg_cls=False</code>
+- <code>MessageSendFn</code>: A function accepting a <code>CanMessageProtocol</code> object if <code>expects_msg_cls=True</code></p>
+<p><strong>Example:</strong>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Simple send</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">send_func</span> <span class="o">=</span> <span class="n">build_send_func</span><span class="p">(</span><span class="n">sock</span><span class="p">,</span> <span class="n">expects_msg_cls</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">send_func</span><span class="p">(</span><span class="mh">0x123</span><span class="p">,</span> <span class="sa">b</span><span class="s1">&#39;</span><span class="se">\x01\x02\x03\x04</span><span class="s1">&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1"># Message class send</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">send_func</span> <span class="o">=</span> <span class="n">build_send_func</span><span class="p">(</span><span class="n">sock</span><span class="p">,</span> <span class="n">expects_msg_cls</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="n">message</span> <span class="o">=</span> <span class="n">CanMessage</span><span class="p">(</span><span class="n">arbitration_id</span><span class="o">=</span><span class="mh">0x456</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="sa">b</span><span class="s1">&#39;</span><span class="se">\x05\x06\x07\x08</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">is_extended_id</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">timestamp</span><span class="o">=</span><span class="mf">0.0</span><span class="p">)</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="n">send_func</span><span class="p">(</span><span class="n">message</span><span class="p">)</span>
+</span></code></pre></div></p>
+<hr />
+<h3 id="build_recv_funcfd-socketcanfd-use_native_timestamps-bool-true-is_stream-bool-false-recvfn"><code>build_recv_func(fd: SocketcanFd, *, use_native_timestamps: bool = True, is_stream: bool = False) -&gt; RecvFn</code></h3>
+<p>Builds a receive function for the given socket.</p>
+<p><strong>Parameters:</strong>
+- <code>fd</code> (<code>SocketcanFd</code>): The socket to receive messages from
+- <code>use_native_timestamps</code> (<code>bool</code>): Use hardware timestamps when available (default: <code>True</code>)
+- <code>is_stream</code> (<code>bool</code>): Use stream mode for daemon-based connections (default: <code>False</code>)</p>
+<p><strong>Returns:</strong>
+- <code>RecvFn</code>: A callable that returns a <code>CanMessage</code> when called</p>
+<p><strong>Example:</strong>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">recv_func</span> <span class="o">=</span> <span class="n">build_recv_func</span><span class="p">(</span><span class="n">sock</span><span class="p">)</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">message</span> <span class="o">=</span> <span class="n">recv_func</span><span class="p">()</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Received: ID=</span><span class="si">{</span><span class="n">message</span><span class="o">.</span><span class="n">arbitration_id</span><span class="si">:</span><span class="s2">#x</span><span class="si">}</span><span class="s2">, Data=</span><span class="si">{</span><span class="n">message</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">hex</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</span></code></pre></div></p>
+<hr />
+<h2 id="data-classes">Data Classes</h2>
+<h3 id="socketcanconfig"><code>SocketcanConfig</code></h3>
+<p>Configuration options for a SocketCAN connection.</p>
+<table>
+<thead>
+<tr>
+<th>Attribute</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>channel</code></td>
+<td><code>str</code></td>
+<td><code>"can0"</code></td>
+<td>CAN interface channel name</td>
+</tr>
+<tr>
+<td><code>loopback</code></td>
+<td><code>LoopbackMode</code></td>
+<td><code>LoopbackMode.FOR_OTHER_SOCKS</code></td>
+<td>Loopback mode for sent messages</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="canmessage"><code>CanMessage</code></h3>
+<p>Container for CAN message data.</p>
+<table>
+<thead>
+<tr>
+<th>Attribute</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>arbitration_id</code></td>
+<td><code>int</code></td>
+<td>CAN message arbitration ID</td>
+</tr>
+<tr>
+<td><code>data</code></td>
+<td><code>bytes</code></td>
+<td>CAN message payload data</td>
+</tr>
+<tr>
+<td><code>is_extended_id</code></td>
+<td><code>bool</code></td>
+<td>Whether the arbitration ID is extended (29-bit)</td>
+</tr>
+<tr>
+<td><code>timestamp</code></td>
+<td><code>float</code></td>
+<td>Message timestamp (seconds since epoch)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="loopbackmode"><code>LoopbackMode</code></h3>
+<p>Controls whether transmitted messages are received by the sender or other sockets.</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>OFF</code></td>
+<td>Sent messages are not received by any socket</td>
+</tr>
+<tr>
+<td><code>FOR_OTHER_SOCKS</code></td>
+<td>(Default) Sent messages are received by other sockets on the same CAN device, but not the sender</td>
+</tr>
+<tr>
+<td><code>ON</code></td>
+<td>Sent messages are received by all sockets including the sender</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="daemon-classes">Daemon Classes</h2>
+<h3 id="socketcanserver"><code>SocketcanServer</code></h3>
+<p>Listens to a CAN bus and dispatches messages to subscribed consumers.</p>
+<p><strong>Constructor:</strong>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">SocketcanServer</span><span class="p">(</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>    <span class="n">bus</span><span class="p">:</span> <span class="n">BusABC</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="o">*</span><span class="p">,</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="n">use_native_timestamps</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>    <span class="n">use_stream</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="p">)</span>
+</span></code></pre></div></p>
+<p><strong>Key Methods:</strong>
+- <code>subscribe(filters: set[int] | None = None) -&gt; SocketcanFd</code>: Subscribe to the bus, returns a socketcan-like socket
+- <code>start(direction: ServerDirection = ServerDirection.BIDIRECTIONAL)</code>: Start TX/RX threads
+- <code>stop()</code>: Stop the server</p>
+<p><strong>Example:</strong>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">sockcan.daemon</span><span class="w"> </span><span class="kn">import</span> <span class="n">SocketcanServer</span><span class="p">,</span> <span class="n">BusParameters</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="k">with</span> <span class="n">SocketcanServer</span><span class="o">.</span><span class="n">factory</span><span class="p">(</span><span class="n">BusParameters</span><span class="p">(</span><span class="n">channel</span><span class="o">=</span><span class="s2">&quot;can0&quot;</span><span class="p">,</span> <span class="n">interface</span><span class="o">=</span><span class="s2">&quot;pcan&quot;</span><span class="p">))</span> <span class="k">as</span> <span class="n">server</span><span class="p">:</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>    <span class="n">sock</span> <span class="o">=</span> <span class="n">server</span><span class="o">.</span><span class="n">subscribe</span><span class="p">()</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="c1"># Use sock with build_send_func and build_recv_func</span>
+</span></code></pre></div></p>
+<hr />
+<h3 id="socketcandaemon"><code>SocketcanDaemon</code></h3>
+<p>HTTP-based daemon that provides SocketCAN service over the network.</p>
+<p><strong>Constructor:</strong>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">SocketcanDaemon</span><span class="p">(</span><span class="n">host</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;localhost&quot;</span><span class="p">,</span> <span class="n">port</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">8000</span><span class="p">)</span>
+</span></code></pre></div></p>
+<p><strong>Key Methods:</strong>
+- <code>register_bus(channel, interface, bitrate=500000, *, use_native_timestamps=False)</code>: Register a real CAN bus
+- <code>register_virtual_bus(channel="vcan0")</code>: Register a virtual CAN bus
+- <code>start()</code>: Start the daemon
+- <code>stop()</code>: Stop the daemon</p>
+<hr />
+<h3 id="busparameters"><code>BusParameters</code></h3>
+<p>Parameters for configuring a CAN bus connection.</p>
+<table>
+<thead>
+<tr>
+<th>Attribute</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>channel</code></td>
+<td><code>str</code></td>
+<td><code>"PCAN_USBBUS1"</code></td>
+<td>CAN interface channel</td>
+</tr>
+<tr>
+<td><code>interface</code></td>
+<td><code>str</code></td>
+<td><code>"pcan"</code></td>
+<td>python-can interface name</td>
+</tr>
+<tr>
+<td><code>bitrate</code></td>
+<td><code>int</code></td>
+<td><code>500000</code></td>
+<td>CAN bus bitrate in bits/second</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h3 id="serverdirection"><code>ServerDirection</code></h3>
+<p>Controls which directions the socketcan server operates in.</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>RX_ONLY</code></td>
+<td>Only receive messages from the bus</td>
+</tr>
+<tr>
+<td><code>TX_ONLY</code></td>
+<td>Only transmit messages to the bus</td>
+</tr>
+<tr>
+<td><code>BIDIRECTIONAL</code></td>
+<td>(Default) Both receive and transmit</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="interoperability-functions-python-can-integration">Interoperability Functions (python-can Integration)</h2>
+<h3 id="hijack_python_cansystem-str-none-none-none"><code>hijack_python_can(system: str | None = None) -&gt; None</code></h3>
+<p>Permanently overrides python-can's socketcan implementation with Sockcan's faster version.</p>
+<p>!!! warning
+    This function modifies global shared state in python-can.</p>
+<p><strong>Example:</strong>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">can</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">sockcan.interop</span><span class="w"> </span><span class="kn">import</span> <span class="n">hijack_python_can</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="n">hijack_python_can</span><span class="p">()</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="c1"># Now uses Sockcan&#39;s optimized implementation</span>
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="n">bus</span> <span class="o">=</span> <span class="n">can</span><span class="o">.</span><span class="n">Bus</span><span class="p">(</span><span class="n">interface</span><span class="o">=</span><span class="s2">&quot;socketcan&quot;</span><span class="p">,</span> <span class="n">channel</span><span class="o">=</span><span class="s2">&quot;can0&quot;</span><span class="p">)</span>
+</span></code></pre></div></p>
+<hr />
+<h3 id="override_python_canbus_cls-typefastsocketcanbus-userspacesocketcanbus-fastsocketcanbus-contextmanager"><code>override_python_can(bus_cls: type[FastSocketcanBus | UserspaceSocketcanBus] = FastSocketcanBus) -&gt; contextmanager</code></h3>
+<p>Temporarily overrides python-can's implementation within a context scope.</p>
+<p><strong>Example:</strong>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">sockcan.interop</span><span class="w"> </span><span class="kn">import</span> <span class="n">override_python_can</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="k">with</span> <span class="n">override_python_can</span><span class="p">():</span>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    <span class="c1"># python-can uses Sockcan here</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>    <span class="n">bus</span> <span class="o">=</span> <span class="n">can</span><span class="o">.</span><span class="n">Bus</span><span class="p">(</span><span class="n">interface</span><span class="o">=</span><span class="s2">&quot;socketcan&quot;</span><span class="p">,</span> <span class="n">channel</span><span class="o">=</span><span class="s2">&quot;can0&quot;</span><span class="p">)</span>
+</span></code></pre></div></p>
+<hr />
+<h3 id="activate_userspace_socketcanparameters-confignone-systemnone-none"><code>activate_userspace_socketcan(parameters, config=None, *, system=None) -&gt; None</code></h3>
+<p>Enables userspace SocketCAN on non-Linux platforms (primarily Windows).</p>
+<p>!!! warning
+    This function modifies global shared state in python-can.</p>
+<p><strong>Example:</strong>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">sockcan.daemon</span><span class="w"> </span><span class="kn">import</span> <span class="n">BusParameters</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">sockcan.interop</span><span class="w"> </span><span class="kn">import</span> <span class="n">activate_userspace_socketcan</span><span class="p">,</span> <span class="n">SocketcanDaemonConfig</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">config</span> <span class="o">=</span> <span class="n">SocketcanDaemonConfig</span><span class="p">(</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    <span class="n">mode</span><span class="o">=</span><span class="s2">&quot;daemon&quot;</span><span class="p">,</span>
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    <span class="n">allow_run_daemon_locally</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="p">)</span>
+</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="n">activate_userspace_socketcan</span><span class="p">(</span>
+</span><span id="__span-8-9"><a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>    <span class="n">BusParameters</span><span class="p">(</span><span class="n">channel</span><span class="o">=</span><span class="s2">&quot;PCAN_USBBUS1&quot;</span><span class="p">,</span> <span class="n">interface</span><span class="o">=</span><span class="s2">&quot;pcan&quot;</span><span class="p">),</span>
+</span><span id="__span-8-10"><a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>    <span class="n">config</span><span class="o">=</span><span class="n">config</span><span class="p">,</span>
+</span><span id="__span-8-11"><a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="p">)</span>
+</span></code></pre></div></p>
+<hr />
+<h3 id="fastsocketcanbus"><code>FastSocketcanBus</code></h3>
+<p>A high-performance socketcan bus implementation that replaces python-can's default.</p>
+<p><strong>Constructor:</strong>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">FastSocketcanBus</span><span class="p">(</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>    <span class="n">channel</span><span class="p">:</span> <span class="n">Channel</span><span class="p">,</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>    <span class="n">can_filters</span><span class="p">:</span> <span class="n">CanFilters</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>    <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="p">)</span>
+</span></code></pre></div></p>
+<hr />
+<h3 id="userspacesocketcanbus"><code>UserspaceSocketcanBus</code></h3>
+<p>A socketcan bus implementation for non-Linux platforms using the userspace daemon.</p>
+<p><strong>Constructor:</strong>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">UserspaceSocketcanBus</span><span class="p">(</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>    <span class="n">channel</span><span class="p">:</span> <span class="n">Channel</span><span class="p">,</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>    <span class="n">can_filters</span><span class="p">:</span> <span class="n">CanFilters</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    <span class="n">socket</span><span class="p">:</span> <span class="n">SocketcanFd</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="p">)</span>
+</span></code></pre></div></p>
+<hr />
+<h3 id="socketcandaemonconfig"><code>SocketcanDaemonConfig</code></h3>
+<p>Configuration for the userspace SocketCAN daemon mode.</p>
+<table>
+<thead>
+<tr>
+<th>Attribute</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mode</code></td>
+<td><code>ServerMode</code></td>
+<td><code>"local"</code></td>
+<td>Operating mode: <code>"local"</code> (thread) or <code>"daemon"</code> (HTTP server)</td>
+</tr>
+<tr>
+<td><code>allow_run_daemon_locally</code></td>
+<td><code>bool</code></td>
+<td><code>True</code></td>
+<td>Allow starting the daemon in the current process</td>
+</tr>
+<tr>
+<td><code>host</code></td>
+<td><code>str</code></td>
+<td><code>"localhost"</code></td>
+<td>Daemon HTTP server host</td>
+</tr>
+<tr>
+<td><code>port</code></td>
+<td><code>int</code></td>
+<td><code>8000</code></td>
+<td>Daemon HTTP server port</td>
+</tr>
+<tr>
+<td><code>linux_too</code></td>
+<td><code>bool</code></td>
+<td><code>False</code></td>
+<td>Allow userspace mode on Linux</td>
+</tr>
+<tr>
+<td><code>use_native_timestamps</code></td>
+<td><code>bool</code></td>
+<td><code>False</code></td>
+<td>Use hardware timestamps</td>
+</tr>
+</tbody>
+</table>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": [], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
