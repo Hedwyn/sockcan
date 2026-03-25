@@ -521,6 +521,7 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
         Stops the daemon thread.
         """
         self._httpd.shutdown()
+        self._httpd_thread.join()
         for channel, server in self._servers.items():
             _logger.info("Stopping socketcanserver on channel %s", channel)
             server.stop()
