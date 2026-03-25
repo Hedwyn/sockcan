@@ -7,19 +7,18 @@ Test suite for the socketcan server
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 import contextlib
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Literal
 
 import pytest
-from can import Message
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from sockcan import build_recv_func
-from sockcan._protocol import build_send_func
+from sockcan._protocol import build_send_func, connect_to_socketcan
 from sockcan.daemon import SocketcanServer
-from sockcan.daemon._server import ServerDirection
+from sockcan.daemon import ServerDirection, SocketcanDaemon, connect_socketcan_client
 from sockcan.fixtures import can_messages, rx_can_bus, tx_can_bus, vcan_bus
 
 if TYPE_CHECKING:
@@ -57,6 +56,17 @@ def get_socketcan_server(
             yield server
         finally:
             server.stop()
+
+
+@contextmanager
+def get_socketcan_daemon() -> Generator[SocketcanDaemon, None, None]:
+    daemon = SocketcanDaemon()
+    daemon.register_bus(channel="vcan0", interface="socketcan")
+    daemon.start()
+    try:
+        yield daemon
+    finally:
+        daemon.stop()
 
 
 @pytest.fixture
@@ -143,7 +153,7 @@ def test_socketcan_bus_bidir(
         conn_1.setblocking(True)  # noqa: FBT003
 
         conn_2 = socketcan_server.subscribe()
-        # conn_2.setblocking(False)  # noqa: FBT003
+        # conn_2.setblocking(False)
         send_fn_2 = build_send_func(conn_2, expects_msg_cls=True)
         recv_fn_2 = build_recv_func(conn_2, use_native_timestamps=False)
 
@@ -228,7 +238,45 @@ def test_virtual_socketcan_bus(
         conn_1.setblocking(True)  # noqa: FBT003
 
         conn_2 = virtual_socketcan_server.subscribe()
-        # conn_2.setblocking(False)  # noqa: FBT003
+        # conn_2.setblocking(False)
+        send_fn_2 = build_send_func(conn_2, expects_msg_cls=True)
+        recv_fn_2 = build_recv_func(conn_2, use_native_timestamps=False)
+
+        for msg in can_messages:
+            send_fn_1(msg)
+            obtained = recv_fn_2()
+            assert obtained.arbitration_id == msg.arbitration_id
+            assert obtained.data == msg.data
+            assert obtained.is_extended_id == msg.is_extended_id
+
+        for msg in can_messages:
+            send_fn_2(msg)
+            obtained = recv_fn_1()
+            assert obtained.arbitration_id == msg.arbitration_id
+            assert obtained.data == msg.data
+
+
+@given(can_messages=st.lists(can_messages(), min_size=10, max_size=100))
+@settings(
+    suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=1, deadline=1000
+)
+def test_socketcan_bus_daemon(
+    can_messages: list[PyCanMessage],
+) -> None:
+    with get_socketcan_daemon():
+        conn_1 = connect_socketcan_client(channel="vcan0")
+
+        recv_fn_1 = build_recv_func(conn_1, use_native_timestamps=False)
+        send_fn_1 = build_send_func(conn_1, expects_msg_cls=True)
+
+        test_msg = can_messages[0]
+        send_fn_1(test_msg)
+        # expecting here to NOT receive our own message
+        conn_1.setblocking(False)  # noqa: FBT003
+        with pytest.raises(BlockingIOError):
+            conn_1.recv(1)
+        conn_1.setblocking(True)  # noqa: FBT003
+        conn_2 = connect_socketcan_client(channel="vcan0")
         send_fn_2 = build_send_func(conn_2, expects_msg_cls=True)
         recv_fn_2 = build_recv_func(conn_2, use_native_timestamps=False)
 

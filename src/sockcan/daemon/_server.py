@@ -472,7 +472,7 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
         Registers the parameters for a new bus that should be managed by this daemon.
         """
         bus = can.Bus(interface=interface, channel=channel, bitrate=bitrate)
-        server = SocketcanServer(bus, use_native_timestamps=use_native_timestamps)
+        server = SocketcanServer(bus, use_native_timestamps=use_native_timestamps, use_stream=True)
         self._servers[channel] = server
 
     def start_socketcan_servers(self) -> None:
@@ -520,6 +520,7 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
         """
         Stops the daemon thread.
         """
+        self._httpd.shutdown()
         for channel, server in self._servers.items():
             _logger.info("Stopping socketcanserver on channel %s", channel)
             server.stop()
