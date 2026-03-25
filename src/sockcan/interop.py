@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Self
 
+import logging
 import can
 from can.interfaces import BACKENDS
 from can.typechecking import CanFilter
@@ -26,6 +27,9 @@ if TYPE_CHECKING:
     from collections.abc import Generator
 
     from can.typechecking import CanFilter, CanFilters, Channel
+
+
+_logger = logging.getLogger(__name__)
 
 
 class FastSocketcanBus:
@@ -226,23 +230,28 @@ def activate_userspace_socketcan(
             server = _init_global_server(params)
             _local_servers[channel] = server
 
-    elif config.mode == "daemon" and not ping_daemon(config.host, config.port):
-        if not config.allow_run_daemon_locally:
-            raise RuntimeError(
-                "Daemon did not reply, and running daemon locally is disabled in config. "
-                "If you want to run daemon locally, enabel `allow_run_daemon_locally`"
+    elif config.mode == "daemon":
+        if ping_daemon(config.host, config.port):
+            _logger.info(
+                "Daemon is already up and run by another process, using the detected instance",
             )
+        else:
+            if not config.allow_run_daemon_locally:
+                raise RuntimeError(
+                    "Daemon did not reply, and running daemon locally is disabled in config. "
+                    "If you want to run daemon locally, enabel `allow_run_daemon_locally`",
+                )
 
-        daemon = SocketcanDaemon(config.host, config.port)
-        for params in parameters:
-            daemon.register_bus(
-                channel=params.channel,
-                interface=params.interface,
-                bitrate=params.bitrate,
-                use_native_timestamps=config.use_native_timestamps,
-            )
-        daemon.start()
-        atexit.register(daemon.stop)
+            daemon = SocketcanDaemon(config.host, config.port)
+            for params in parameters:
+                daemon.register_bus(
+                    channel=params.channel,
+                    interface=params.interface,
+                    bitrate=params.bitrate,
+                    use_native_timestamps=config.use_native_timestamps,
+                )
+            daemon.start()
+            atexit.register(daemon.stop)
     _hijack_python_can(UserspaceSocketcanBus)
 
 
