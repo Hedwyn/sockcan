@@ -11,6 +11,7 @@ For interfaces like pcan on Windows, this also allows concurrent connection on t
 from __future__ import annotations
 
 import atexit
+import errno
 import logging
 import os
 import socket
@@ -40,6 +41,10 @@ if TYPE_CHECKING:
     from can import BusABC
 
 _logger = logging.getLogger(__name__)
+
+
+ENDPOINT_NOT_CONNECTED_ERRNO = errno.ENOTCONN
+CONNECTION_REFUSED_ERRRNO = errno.ECONNREFUSED
 
 
 class ServerDirection(Enum):
@@ -85,10 +90,19 @@ class SocketcanServer:
     mess up with the internal selection logic.
     """
 
-    def __init__(self, bus: BusABC | None = None, *, use_native_timestamps: bool = False) -> None:
+    def __init__(
+        self,
+        bus: BusABC | None = None,
+        *,
+        use_native_timestamps: bool = False,
+        use_stream: bool = False,
+    ) -> None:
         """
         Wraps the passed `bus`. For interfaces that do not support concurrency
         (e.g. pcan windows), this object should be the only one accessing the real bus.
+
+        If `use_stream`  is enabled, uses `SOCK_STREAM` instead of `SOCK_DGRAM`
+        when creating sockets.
         """
         self._consumers: list[_Consumer] = []
         self._kill_switch = Event
@@ -99,6 +113,7 @@ class SocketcanServer:
         self._threads: list[Thread] = []
         self.use_native_timestamps = use_native_timestamps
         self._selector.register(self._kill_switch_rx, events=EVENT_READ, data=None)
+        self._use_stream = use_stream
 
     @property
     def bus(self) -> BusABC | None:
@@ -122,14 +137,20 @@ class SocketcanServer:
         self,
         fd: SocketcanFd,
         filters: set[int] | None = None,
-        *,
-        is_stream: bool = False,
     ) -> None:
+        # sanity checks
+        if self._use_stream and fd.type != socket.SOCK_STREAM:
+            raise RuntimeError("Server is configured to stream mode, cannot listen to DGRAM socket")
+        if not self._use_stream and fd.type != socket.SOCK_DGRAM:
+            raise RuntimeError(
+                "Server is configured to DGRAM mode, cannot listen to SOCK_STREAM socket",
+            )
+
         send_fn = build_send_func(fd, expects_msg_cls=False)
         recv_fn = build_recv_func(
             fd,
             use_native_timestamps=self.use_native_timestamps,
-            is_stream=is_stream,
+            is_stream=self._use_stream,
         )
         self._consumers.append(_Consumer(send_fn, fd, filters))
         self._selector.register(fd, events=EVENT_READ, data=recv_fn)
@@ -143,7 +164,10 @@ class SocketcanServer:
         with socketcan protocol.
         If filters is passed, only messages with requested filters will be forwarded.
         """
-        _ours, _theirs = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
+        if self._use_stream:
+            _ours, _theirs = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+        else:
+            _ours, _theirs = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
         ours = cast("SocketcanFd", _ours)
         theirs = cast("SocketcanFd", _theirs)
         self.listen_to(ours, filters=filters)
@@ -222,6 +246,7 @@ class SocketcanServer:
         recv = self._bus.recv
         consumers = self._consumers
         closed_connections: list[_Consumer] = []
+        is_stream = self._use_stream
         while True:
             if closed_connections:
                 for consumer in closed_connections:
@@ -243,6 +268,14 @@ class SocketcanServer:
                 except BrokenPipeError:
                     _logger.info("Client closed connection")
                     closed_connections.append(consumer)
+                except OSError as exc:
+                    if not is_stream and exc.errno not in [
+                        ENDPOINT_NOT_CONNECTED_ERRNO,
+                        CONNECTION_REFUSED_ERRRNO,
+                    ]:
+                        raise
+                    # for DGRAM sockets, just ignoring,
+                    # this errno means the other side is not listening
 
     def run_tx(self) -> None:
         """
@@ -269,6 +302,7 @@ class SocketcanServer:
         bus_send = self._bus.send if self._bus else None
         kill_switch = self._kill_switch_rx
         consumers = self._consumers
+        is_stream = self._use_stream
         while self._running:
             selector_events = selector.select()
             for key, _ in selector_events:
@@ -303,6 +337,12 @@ class SocketcanServer:
                         send_fn(msg.arbitration_id, msg.data, msg.is_extended_id)
                     except (BrokenPipeError, ConnectionResetError):
                         continue
+                    except OSError as exc:
+                        if not is_stream and exc.errno not in [
+                            ENDPOINT_NOT_CONNECTED_ERRNO,
+                            CONNECTION_REFUSED_ERRRNO,
+                        ]:
+                            raise
 
                 if bus_send is not None:
                     py_can_msg = Message(
@@ -387,7 +427,7 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
                 sock = self.request
                 assert server.running, "Server should have been started already"
                 _logger.info("Listening to socket")
-                server.listen_to(sock, is_stream=True)
+                server.listen_to(sock)
                 _logger.info("Upgrading connection to socketcan")
                 # TODO: wait for socket to close
                 time.sleep(1000)
@@ -415,8 +455,8 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
         Communications within the bus are simulated and will only be seen by the consumers
         of that bus.
         """
-        virtual_server = SocketcanServer()
-        self._servers[channel] = SocketcanServer()
+        virtual_server = SocketcanServer(use_stream=True)
+        self._servers[channel] = virtual_server
         if self.is_running:
             virtual_server.start()
 
