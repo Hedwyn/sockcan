@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 type SignalValue = int | float | str
 
 
-class _SignalProperties(NamedTuple):
+class SignalProperties(NamedTuple):
     name: str
     mask: int
     bit_offset: int
@@ -25,8 +25,8 @@ class _SignalProperties(NamedTuple):
     reverse_named_values: dict[int, str] | None = None
 
 
-def extract_signal_properties(message: Message) -> list[_SignalProperties]:
-    signal_properties: list[_SignalProperties] = []
+def extract_signal_properties(message: Message) -> list[SignalProperties]:
+    signal_properties: list[SignalProperties] = []
     for signal in message.signals:
         named_values: dict[str, int] | None = None
         mask = (1 << signal.length) - 1
@@ -37,11 +37,9 @@ def extract_signal_properties(message: Message) -> list[_SignalProperties]:
             else None
         )
         reversed_named_values = (
-            {val: key for key, val in named_values.items()}
-            if named_values is not None
-            else None
+            {val: key for key, val in named_values.items()} if named_values is not None else None
         )
-        properties = _SignalProperties(
+        properties = SignalProperties(
             name=signal.name,
             bit_offset=signal.start,
             mask=mask,

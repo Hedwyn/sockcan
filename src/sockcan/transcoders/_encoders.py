@@ -10,7 +10,7 @@ from __future__ import annotations
 from functools import partial
 from typing import TYPE_CHECKING
 
-from ._common import _SignalProperties, extract_signal_properties
+from ._common import SignalProperties, extract_signal_properties
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -22,7 +22,7 @@ type SignalValue = int | float | str
 
 def encode(
     payload: dict[str, SignalValue],
-    signals: list[_SignalProperties],
+    signals: list[SignalProperties],
     dlc: int = 8,
     *,
     named_values: bool | None = None,

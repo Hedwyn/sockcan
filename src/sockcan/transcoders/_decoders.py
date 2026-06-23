@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 from ._common import (
     SignalValue,
-    _SignalProperties,
+    SignalProperties,
     extract_signal_properties,
 )
 
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 def decode(
     payload: bytes,
-    signals: list[_SignalProperties],
+    signals: list[SignalProperties],
     *,
     decode_choices: bool = True,
     container: dict[str, SignalValue] | None = None,
