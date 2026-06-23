@@ -13,7 +13,7 @@ import pytest
 from cantools.database import load_file
 from cantools.database.can import Database as CanDatabase
 
-from sockcan.transcoders import SignalValue, build_encoder
+from sockcan.transcoders import SignalValue, build_decoder, build_encoder
 
 DB_PATH = Path(__file__).parent / "kcd_sample.kcd"
 
@@ -263,7 +263,10 @@ def db() -> CanDatabase:
     ],
 )
 def test_simple_encode(
-    db: CanDatabase, msg_name: str, payload: dict[str, SignalValue], valid: bool
+    db: CanDatabase,
+    msg_name: str,
+    payload: dict[str, SignalValue],
+    valid: bool,
 ) -> None:
     message = db.get_message_by_name(msg_name)
     encode = build_encoder(message)
@@ -415,7 +418,6 @@ def test_simple_encode(
                 "Mute": 0,
             },
             True,
-            marks=pytest.mark.xfail(reason="Muxes not implemented yet"),
         ),
     ],
 )
@@ -423,18 +425,16 @@ def test_simple_decode(
     db: CanDatabase,
     msg_name: str,
     payload: dict[str, SignalValue],
+    *,
     decode_choices: bool,
 ) -> None:
-    from sockcan.transcoders._encoders import extract_signal_properties
-    from sockcan.transcoders._decoders import decode
-
     message = db.get_message_by_name(msg_name)
-    signals = extract_signal_properties(message)
 
     # Encode the payload
     encoded_bytes = message.encode(payload)
 
     # Decode the bytes
-    decoded = decode(encoded_bytes, signals, decode_choices=decode_choices)
+    decode = build_decoder(message, decode_choices=decode_choices)
+    decoded = decode(encoded_bytes)
     expected = message.decode(encoded_bytes, decode_choices=decode_choices)
     assert expected == decoded
