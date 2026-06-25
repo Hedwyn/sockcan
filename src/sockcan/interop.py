@@ -8,12 +8,12 @@ Interoperability features with python-can.
 from __future__ import annotations
 
 import atexit
+import logging
 import platform
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Self
 
-import logging
 import can
 from can.interfaces import BACKENDS
 from can.typechecking import CanFilter
@@ -21,7 +21,7 @@ from can.typechecking import CanFilter
 from sockcan import connect_to_socketcan
 from sockcan._protocol import SocketcanConfig, SocketcanFd, build_recv_func, build_send_func
 from sockcan.daemon import SocketcanServer, connect_socketcan_client, ping_daemon
-from sockcan.daemon._server import BusParameters, SocketcanDaemon, ensure_socketcan_daemon_running
+from sockcan.daemon._server import BusParameters, SocketcanDaemon
 
 if TYPE_CHECKING:
     from collections.abc import Generator

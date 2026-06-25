@@ -35,11 +35,13 @@ def ping_daemon(
         return False
 
     ping_request = (
-        HTTP_DELIMITER.join([
-            "GET /ping HTTP/1.1",
-            f"Host: {host}:{port}",
-            "Connection: close",
-        ])
+        HTTP_DELIMITER.join(
+            [
+                "GET /ping HTTP/1.1",
+                f"Host: {host}:{port}",
+                "Connection: close",
+            ]
+        )
         + 2 * HTTP_DELIMITER
     )
     sock.sendall(ping_request.encode("utf-8"))
@@ -66,12 +68,14 @@ def connect_socketcan_client(
 
     # 3. Construct the HTTP Upgrade Request
     upgrade_request = (
-        HTTP_DELIMITER.join([
-            f"GET /subscribe?channel={channel} HTTP/1.1{HTTP_DELIMITER}",
-            f"Host: {host}:{port}",
-            "Connection: Upgrade",
-            "Upgrade: socketcan",
-        ])
+        HTTP_DELIMITER.join(
+            [
+                f"GET /subscribe?channel={channel} HTTP/1.1{HTTP_DELIMITER}",
+                f"Host: {host}:{port}",
+                "Connection: Upgrade",
+                "Upgrade: socketcan",
+            ]
+        )
         + HTTP_DELIMITER
     )
 
