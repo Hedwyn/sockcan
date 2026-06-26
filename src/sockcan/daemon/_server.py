@@ -412,6 +412,100 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
 
+class _RequestHandler(BaseHTTPRequestHandler):
+    """
+    The handler object that should be spawned on each request,
+    as expected by HTTPServer.
+    Keeps track of the parent daemon so that it can call the internal subscription logic.
+    """
+
+    def __init__(
+        self,
+        request: socket.socket | tuple[bytes, socket.socket],
+        client_address: tuple[str, int],
+        server: HTTPServer,
+        daemon: SocketcanDaemon,
+    ) -> None:
+        self.daemon = daemon
+        self.kill_switch = Event()
+        super().__init__(request, client_address, server)
+
+    def do_GET(self) -> None:
+        """
+        Handler for GET requests.
+        """
+        # Parse the URL to get the path and the query parameters
+        parsed_url = urlparse(self.path)
+        path = parsed_url.path
+        params = parse_qs(parsed_url.query)
+
+        if path == "/ping":
+            self.send_response_and_content(str(os.getpid()))
+            return
+
+        # Extract 'channel' parameter
+        channel = params.get("channel", [None])[0]
+        _logger.info("Received subscribe request for channel %s: %s", channel, path)
+        if channel is None:
+            self.send_response_and_content("Channel must be specified", code=400)
+            return
+        if (server := self.daemon._servers.get(channel)) is None:
+            _logger.info("No server")
+            self.send_response_and_content(
+                "Requested channel is not managed by this daemon",
+                code=400,
+            )
+            return
+
+        if path == "/subscribe":
+            filters = None
+            if filter_str := params.get("filters", [None])[0]:
+                try:
+                    # Filters are URL-encoded JSON
+                    filters_json = unquote(filter_str)
+                    filters = json.loads(filters_json)
+                    # Validate that it's a list of filter dicts
+                    if not isinstance(filters, list):
+                        raise TypeError("Filters should be a list")
+                except (json.JSONDecodeError, ValueError) as e:
+                    self.send_response_and_content(f"Invalid filters format: {e}", code=400)
+                    return
+
+            self.send_response(101)
+            self.send_header("Upgrade", "socketcan")
+            self.send_header("Connection", "Upgrade")
+            self.end_headers()
+            self.wfile.flush()  # Ensure headers are actually on the wire
+            sock = self.request
+            assert server.running, "Server should have been started already"
+            _logger.info("Listening to socket with filters: %s", filters)
+            server.listen_to(sock, filters=filters)
+            _logger.info("Upgrading connection to socketcan")
+            # Keep the connection open for socketcan communication
+            # The SocketcanServer's TX/RX threads will handle the actual communication
+            # We need to keep the handler from returning to prevent the socket from being closed.
+            # Use a long timeout to support long-running connections (e.g., benchmarks)
+            # TODO: Properly implement HTTP upgrade by detaching the socket
+            self.kill_switch.wait()
+
+        elif path == "/unsubscribe":
+            raise NotImplementedError
+
+        else:
+            self.send_response(404)
+            self.end_headers()
+            self.wfile.write(b"404 Not Found: Provide a 'channel' parameter.")
+
+    def send_response_and_content(self, message: str, code: int = 200) -> None:
+        """
+        Small helper to send a response with required headers as standalone.
+        """
+        self.send_response(code)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(message.encode())
+
+
 class SocketcanDaemon(BaseHTTPRequestHandler):
     """
     Proviedes the Socketcan service over an HTTP server.
@@ -423,102 +517,10 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
     def __init__(self, host: str = "localhost", port: int = 8000) -> None:
         self._port = port
         self._host = host
-        self._httpd = ThreadedHTTPServer((host, port), partial(self._RequestHandler, daemon=self))
+        self._httpd = ThreadedHTTPServer((host, port), partial(_RequestHandler, daemon=self))
 
         self._httpd_thread: Thread | None = None
         self._servers: dict[str, SocketcanServer] = {}
-
-    class _RequestHandler(BaseHTTPRequestHandler):
-        """
-        The handler object that should be spawned on each request,
-        as expected by HTTPServer.
-        Keeps track of the parent daemon so that it can call the internal subscription logic.
-        """
-
-        def __init__(
-            self,
-            request: socket.socket | tuple[bytes, socket.socket],
-            client_address: tuple[str, int],
-            server: HTTPServer,
-            daemon: SocketcanDaemon,
-        ) -> None:
-            self.daemon = daemon
-            super().__init__(request, client_address, server)
-
-        def do_GET(self) -> None:
-            """
-            Handler for GET requests.
-            """
-            # Parse the URL to get the path and the query parameters
-            parsed_url = urlparse(self.path)
-            path = parsed_url.path
-            params = parse_qs(parsed_url.query)
-
-            if path == "/ping":
-                self.send_response_and_content(str(os.getpid()))
-                return
-
-            # Extract 'channel' parameter
-            channel = params.get("channel", [None])[0]
-            _logger.info("Received subscribe request for channel %s: %s", channel, path)
-            if channel is None:
-                self.send_response_and_content("Channel must be specified", code=400)
-                return
-            if (server := self.daemon._servers.get(channel)) is None:
-                _logger.info("No server")
-                self.send_response_and_content(
-                    "Requested channel is not managed by this daemon",
-                    code=400,
-                )
-                return
-
-            if path == "/subscribe":
-                filters = None
-                if filter_str := params.get("filters", [None])[0]:
-                    try:
-                        # Filters are URL-encoded JSON
-                        filters_json = unquote(filter_str)
-                        filters = json.loads(filters_json)
-                        # Validate that it's a list of filter dicts
-                        if not isinstance(filters, list):
-                            raise ValueError("Filters should be a list")
-                    except (json.JSONDecodeError, ValueError) as e:
-                        self.send_response_and_content(f"Invalid filters format: {e}", code=400)
-                        return
-
-                self.send_response(101)
-                self.send_header("Upgrade", "socketcan")
-                self.send_header("Connection", "Upgrade")
-                self.end_headers()
-                self.wfile.flush()  # Ensure headers are actually on the wire
-                sock = self.request
-                assert server.running, "Server should have been started already"
-                _logger.info("Listening to socket with filters: %s", filters)
-                server.listen_to(sock, filters=filters)
-                _logger.info("Upgrading connection to socketcan")
-                # Keep the connection open for socketcan communication
-                # The SocketcanServer's TX/RX threads will handle the actual communication
-                # We need to keep the handler from returning to prevent the socket from being closed.
-                # Use a long timeout to support long-running connections (e.g., benchmarks)
-                # TODO: Properly implement HTTP upgrade by detaching the socket
-                time.sleep(1000)
-
-            elif path == "/unsubscribe":
-                raise NotImplementedError
-
-            else:
-                self.send_response(404)
-                self.end_headers()
-                self.wfile.write(b"404 Not Found: Provide a 'channel' parameter.")
-
-        def send_response_and_content(self, message: str, code: int = 200) -> None:
-            """
-            Small helper to send a response with required headers as standalone.
-            """
-            self.send_response(code)
-            self.send_header("Content-type", "text/plain")
-            self.end_headers()
-            self.wfile.write(message.encode())
 
     def register_virtual_bus(self, channel: str = "vcan0") -> None:
         """
