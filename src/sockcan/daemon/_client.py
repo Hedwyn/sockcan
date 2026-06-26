@@ -54,10 +54,12 @@ def connect_socketcan_client(
     host: str = "localhost",
     port: int = 8000,
     channel: str = "PCAN_USBBUS1",
+    filters: set[int] | None = None,
 ) -> SocketcanFd:
     """
     Sends a subscription request to socketcan daemon running on `host`:`port`
     for the CAN channel `channel`.
+    If filters is provided, only messages with those CAN IDs will be received.
     Returns the a socketcan socket if successful.
     Raises ValueError if daemon returns a 400.
     """
@@ -67,10 +69,15 @@ def connect_socketcan_client(
     _logger.info("Connected to %s:%d", host, port)
 
     # 3. Construct the HTTP Upgrade Request
+    query_params = f"channel={channel}"
+    if filters:
+        filter_str = ",".join(str(f) for f in sorted(filters))
+        query_params += f"&filters={filter_str}"
+
     upgrade_request = (
         HTTP_DELIMITER.join(
             [
-                f"GET /subscribe?channel={channel} HTTP/1.1{HTTP_DELIMITER}",
+                f"GET /subscribe?{query_params} HTTP/1.1{HTTP_DELIMITER}",
                 f"Host: {host}:{port}",
                 "Connection: Upgrade",
                 "Upgrade: socketcan",

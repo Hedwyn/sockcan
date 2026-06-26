@@ -306,3 +306,64 @@ def test_socketcan_bus_daemon(
             assert obtained.arbitration_id == msg.arbitration_id
             assert obtained.data == msg.data
             assert obtained.is_extended_id == msg.is_extended_id
+
+
+@pytest.mark.parametrize("use_stream", [False, True])
+def test_socketcan_server_with_filters(
+    tx_can_bus: SocketcanBus,
+    *,
+    use_stream: bool,
+) -> None:
+    from can import Message
+
+    with get_socketcan_server(use_stream=use_stream) as socketcan_server:
+        # Client 1: subscribes with filter for specific IDs
+        conn_1 = socketcan_server.subscribe(filters={0x100, 0x200})
+        socketcan_server.start(direction=ServerDirection.RX_ONLY)
+        recv_fn_1 = build_recv_func(conn_1, use_native_timestamps=False, is_stream=use_stream)
+
+        # Client 2: subscribes with different filters
+        conn_2 = socketcan_server.subscribe(filters={0x300, 0x400})
+        recv_fn_2 = build_recv_func(conn_2, use_native_timestamps=False, is_stream=use_stream)
+
+        # Client 3: no filters, receives all messages
+        conn_3 = socketcan_server.subscribe()
+        recv_fn_3 = build_recv_func(conn_3, use_native_timestamps=False, is_stream=use_stream)
+
+        # Send message with ID 0x100, should reach client 1 and 3, not client 2
+        msg = Message(arbitration_id=0x100, data=b"test1")
+        tx_can_bus.send(msg)
+        obtained = recv_fn_1()
+        assert obtained.arbitration_id == 0x100
+        obtained = recv_fn_3()
+        assert obtained.arbitration_id == 0x100
+        conn_2.setblocking(False)  # noqa: FBT003
+        with pytest.raises(BlockingIOError):
+            conn_2.recv(1)
+        conn_2.setblocking(True)  # noqa: FBT003
+
+        # Send message with ID 0x300, should reach client 2 and 3, not client 1
+        msg = Message(arbitration_id=0x300, data=b"test2")
+        tx_can_bus.send(msg)
+        obtained = recv_fn_2()
+        assert obtained.arbitration_id == 0x300
+        obtained = recv_fn_3()
+        assert obtained.arbitration_id == 0x300
+        conn_1.setblocking(False)  # noqa: FBT003
+        with pytest.raises(BlockingIOError):
+            conn_1.recv(1)
+        conn_1.setblocking(True)  # noqa: FBT003
+
+        # Send message with ID not in any filter, should only reach client 3
+        msg = Message(arbitration_id=0x999, data=b"test3")
+        tx_can_bus.send(msg)
+        obtained = recv_fn_3()
+        assert obtained.arbitration_id == 0x999
+        conn_1.setblocking(False)  # noqa: FBT003
+        with pytest.raises(BlockingIOError):
+            conn_1.recv(1)
+        conn_1.setblocking(True)  # noqa: FBT003
+        conn_2.setblocking(False)  # noqa: FBT003
+        with pytest.raises(BlockingIOError):
+            conn_2.recv(1)
+        conn_2.setblocking(True)  # noqa: FBT003

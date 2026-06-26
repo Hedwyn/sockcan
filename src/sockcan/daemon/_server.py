@@ -322,7 +322,12 @@ class SocketcanServer:
 
                 try:
                     msg = recv_fn()
-                except (struct.error, ConnectionResetError):
+                except (struct.error, OSError):
+                    # A consumer disconnecting is normal: the recv helper wraps the
+                    # underlying socket error (e.g. ConnectionResetError on an abrupt
+                    # client close) into a plain OSError, so catch the whole OSError
+                    # family here. Unregister that consumer and keep serving the rest
+                    # instead of letting the TX thread die.
                     _logger.info("Bus closed")
                     selector.unregister(key.fileobj)
                     continue
@@ -419,6 +424,16 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
                 return
 
             if path == "/subscribe":
+                filters = None
+                if filter_str := params.get("filters", [None])[0]:
+                    try:
+                        filters = set(int(f, 0) for f in filter_str.split(","))
+                    except ValueError:
+                        self.send_response_and_content(
+                            "Invalid filters format, expected comma-separated CAN IDs", code=400
+                        )
+                        return
+
                 self.send_response(101)
                 self.send_header("Upgrade", "socketcan")
                 self.send_header("Connection", "Upgrade")
@@ -426,8 +441,8 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
                 self.wfile.flush()  # Ensure headers are actually on the wire
                 sock = self.request
                 assert server.running, "Server should have been started already"
-                _logger.info("Listening to socket")
-                server.listen_to(sock)
+                _logger.info("Listening to socket with filters: %s", filters)
+                server.listen_to(sock, filters=filters)
                 _logger.info("Upgrading connection to socketcan")
                 # TODO: wait for socket to close
                 time.sleep(1000)
