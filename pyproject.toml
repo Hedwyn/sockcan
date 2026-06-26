@@ -14,9 +14,26 @@ authors = [{ name = "Baptiste Pestourie" }]
 dependencies = []
 
 [project.optional-dependencies]
+transcoders = ["python-can"]
 daemon = ["click", "python-can"]
 test = ["hypothesis", "pytest", "python-can", "cantools"]
 docs = ["mkdocs", "mkdocs-material"]
+lint = ["ruff", "mypy"]
+# an extra that contains all other extras relevant for users of sockcan
+all_inclusive = ["python-can", "cantools", "click", "python-can"]
+# an extra that contains all extras relvant for dev use
+dev = [
+  "hypothesis",
+  "pytest",
+  "python-can",
+  "cantools",
+  "click",
+  "python-can",
+  "ruff",
+  "mypy",
+  "hypothesis",
+  "pytest",
+]
 
 [project.urls]
 Homepage = "https://github.com/Hedwyn/sockcan"
