@@ -14,7 +14,6 @@ from time import perf_counter
 import can
 from can import Message
 
-
 TEST_MSG = can.Message(arbitration_id=0x200, data=b"\x00\x01\x02\x03\x04\x05\x06\x07")
 
 # Each tick yields elapsed seconds for that batch.

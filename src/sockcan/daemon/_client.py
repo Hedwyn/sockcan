@@ -8,11 +8,15 @@ Sends an HTTP request to get a socket.
 
 from __future__ import annotations
 
+import json
 import logging
 import socket
 from typing import TYPE_CHECKING, cast
+from urllib.parse import quote
 
 if TYPE_CHECKING:
+    from can.typechecking import CanFilter
+
     from sockcan import SocketcanFd
 
 _logger = logging.getLogger(__name__)
@@ -40,7 +44,7 @@ def ping_daemon(
                 "GET /ping HTTP/1.1",
                 f"Host: {host}:{port}",
                 "Connection: close",
-            ]
+            ],
         )
         + 2 * HTTP_DELIMITER
     )
@@ -54,12 +58,12 @@ def connect_socketcan_client(
     host: str = "localhost",
     port: int = 8000,
     channel: str = "PCAN_USBBUS1",
-    filters: set[int] | None = None,
+    filters: list[CanFilter] | None = None,
 ) -> SocketcanFd:
     """
     Sends a subscription request to socketcan daemon running on `host`:`port`
     for the CAN channel `channel`.
-    If filters is provided, only messages with those CAN IDs will be received.
+    If filters is provided, only messages matching those filters will be received.
     Returns the a socketcan socket if successful.
     Raises ValueError if daemon returns a 400.
     """
@@ -71,8 +75,10 @@ def connect_socketcan_client(
     # 3. Construct the HTTP Upgrade Request
     query_params = f"channel={channel}"
     if filters:
-        filter_str = ",".join(str(f) for f in sorted(filters))
-        query_params += f"&filters={filter_str}"
+        # Serialize filters as JSON and URL-encode
+        filters_json = json.dumps(filters)
+        filters_encoded = quote(filters_json)
+        query_params += f"&filters={filters_encoded}"
 
     upgrade_request = (
         HTTP_DELIMITER.join(
@@ -81,7 +87,7 @@ def connect_socketcan_client(
                 f"Host: {host}:{port}",
                 "Connection: Upgrade",
                 "Upgrade: socketcan",
-            ]
+            ],
         )
         + HTTP_DELIMITER
     )

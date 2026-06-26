@@ -48,12 +48,27 @@ class FastSocketcanBus:
         **kwargs: object,
     ) -> None:
         _ = kwargs
-        self._filters: list[CanFilter] = list(can_filters or [])
+        self._can_filters: list[CanFilter] = list(can_filters or [])
         # Note: actual socket is kept under .socket in SocketcanBus
         self._config = SocketcanConfig(channel=str(channel))
         self.socket = connect_to_socketcan(self._config)
         self.send = build_send_func(self.socket, expects_msg_cls=True)
         self.recv = build_recv_func(self.socket)
+
+    @property
+    def filters(self) -> CanFilters | None:
+        return self._can_filters if self._can_filters else None
+
+    @filters.setter
+    def filters(self, filters: CanFilters | None) -> None:
+        self.set_filters(filters)
+
+    def set_filters(self, filters: CanFilters | None = None) -> None:
+        self._can_filters = list(filters or [])
+        # Note: For native socketcan, filters should be applied at the kernel level
+        # via CAN_RAW_FILTER setsockopt. This implementation stores filters but
+        # doesn't apply them at the kernel level. Users should use the kernel's
+        # filter mechanism directly if needed.
 
     def __enter__(self) -> Self:
         """
@@ -107,12 +122,14 @@ class UserspaceSocketcanBus:
         **kwargs: object,
     ) -> None:
         _ = kwargs
-        self._filters: CanFilters | None = None
+        self._can_filters: list[CanFilter] = []
         # Note: actual socket is kept under .socket in SocketcanBus
         self._config = SocketcanConfig(channel=str(channel))
+        self._channel = str(channel)
         if socket is None:
             assert isinstance(channel, str)
-            socket = self._get_socket(channel)
+            # Pass can_filters directly to _get_socket
+            socket = self._get_socket(channel, can_filters)
         self.socket = socket
         self.send = build_send_func(self.socket, expects_msg_cls=True)
         self.recv = build_recv_func(
@@ -120,37 +137,54 @@ class UserspaceSocketcanBus:
             use_native_timestamps=False,
             is_stream=_global_config.mode == "daemon",
         )
-        self.set_filters(can_filters)
+        # Store the python-can filters
+        self._can_filters = list(can_filters or [])
 
     def fileno(self) -> int:
         return self.socket.fileno()
 
     @property
     def filters(self) -> CanFilters | None:
-        return self._filters
+        return self._can_filters if self._can_filters else None
 
     @filters.setter
     def filters(self, filters: CanFilters | None) -> None:
         self.set_filters(filters)
 
     def set_filters(self, filters: CanFilters | None = None) -> None:
-        self._filters = filters or None
-        if self._filters:
-            warnings.warn(
-                "Filters are stored but not applied: hardware/software filtering is not implemented yet.",
-                stacklevel=2,
-            )
+        """
+        Sets the filters for this bus.
+        Passes python-can filter format directly to the daemon.
+        If filters are changed after initialization, the socket is recreated with the new filters.
+        Supports mask-based filtering as per python-can specification.
+        """
+        # Convert to list for comparison
+        new_filters = list(filters or [])
+
+        # Store the python-can format filters
+        self._can_filters = new_filters
+
+        # Recreate the socket with new filters
+        self.socket.close()
+        self.socket = self._get_socket(self._channel, filters)
+        # Rebuild send and recv functions with the new socket
+        self.send = build_send_func(self.socket, expects_msg_cls=True)
+        self.recv = build_recv_func(
+            self.socket,
+            use_native_timestamps=False,
+            is_stream=_global_config.mode == "daemon",
+        )
 
     def shutdown(self) -> None:
         self.socket.close()
 
     @classmethod
-    def _get_socket(cls, channel: str) -> SocketcanFd:
+    def _get_socket(cls, channel: str, filters: CanFilters | None = None) -> SocketcanFd:
         if _global_config.mode == "local":
             target_server = _local_servers.get(channel)
             if target_server is None:
                 raise RuntimeError(f"Socketcanserver is not started on channel {channel}")
-            return target_server.subscribe()
+            return target_server.subscribe(filters=list(filters) if filters else None)
 
         # daemon mode
         if not ping_daemon(_global_config.host, _global_config.port):
@@ -159,7 +193,12 @@ class UserspaceSocketcanBus:
                 "If you were intending to run daemon locally, "
                 "use `ensure_socketcan_daemon_running()`",
             )
-        return connect_socketcan_client(_global_config.host, _global_config.port, channel)
+        return connect_socketcan_client(
+            _global_config.host,
+            _global_config.port,
+            channel,
+            filters=list(filters) if filters else None,
+        )
 
     def __enter__(self) -> Self:
         """

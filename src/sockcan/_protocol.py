@@ -234,7 +234,8 @@ def _socketcan_recv_stream(
     return CanMessage(can_id, data, is_extended, timestamp)
 
 
-type RecvFn = Callable[[float | None], CanMessage]
+class RecvFn(Protocol):
+    def __call__(self, timeout: float | None = None) -> CanMessage: ...
 
 
 def build_recv_func(

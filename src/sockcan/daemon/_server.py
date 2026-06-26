@@ -11,7 +11,9 @@ For interfaces like pcan on Windows, this also allows concurrent connection on t
 from __future__ import annotations
 
 import atexit
+import contextlib
 import errno
+import json
 import logging
 import os
 import socket
@@ -27,7 +29,7 @@ from selectors import EVENT_READ, DefaultSelector
 from socketserver import ThreadingMixIn
 from threading import Event, Thread
 from typing import TYPE_CHECKING, NamedTuple, Self, cast
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import can
 from can import BusState, Message
@@ -39,8 +41,29 @@ from ._client import ping_daemon
 if TYPE_CHECKING:
     from _typeshed import FileDescriptorLike
     from can import BusABC
+    from can.typechecking import CanFilter
 
 _logger = logging.getLogger(__name__)
+
+
+def _normalize_filters(
+    filters: set[int] | list[CanFilter] | None,
+) -> list[CanFilter] | None:
+    """
+    Normalizes filters to list[CanFilter] format.
+    Converts set[int] to list of CanFilter dicts with full masks.
+    """
+    if filters is None:
+        return None
+
+    # If it's already a list of CanFilter dicts, return as is
+    if isinstance(filters, list):
+        return filters
+
+    # If it's a set of ints, convert to list of CanFilter dicts
+    if isinstance(filters, set):
+        return [{"can_id": can_id, "can_mask": 0x1FFFFFFF} for can_id in filters]
+    raise TypeError(f"Unsupported filter type: {type(filters)}")
 
 
 ENDPOINT_NOT_CONNECTED_ERRNO = errno.ENOTCONN
@@ -78,7 +101,7 @@ class _Consumer(NamedTuple):
 
     sender: SendFn
     fd: FileDescriptorLike
-    filters: set[int] | None
+    filters: list[CanFilter] | None
 
 
 class SocketcanServer:
@@ -136,8 +159,11 @@ class SocketcanServer:
     def listen_to(
         self,
         fd: SocketcanFd,
-        filters: set[int] | None = None,
+        filters: set[int] | list[CanFilter] | None = None,
     ) -> None:
+        # Normalize filters to list[CanFilter] format
+        normalized_filters = _normalize_filters(filters)
+
         # sanity checks
         if self._use_stream and fd.type != socket.SOCK_STREAM:
             raise RuntimeError("Server is configured to stream mode, cannot listen to DGRAM socket")
@@ -152,17 +178,21 @@ class SocketcanServer:
             use_native_timestamps=self.use_native_timestamps,
             is_stream=self._use_stream,
         )
-        self._consumers.append(_Consumer(send_fn, fd, filters))
-        self._selector.register(fd, events=EVENT_READ, data=recv_fn)
+        self._consumers.append(_Consumer(send_fn, fd, normalized_filters))
+        # KeyError is expected if Socket is already registered (e.g., HTTP upgrade socket)
+        # This is fine, we'll handle it in the HTTP handler thread
+        with contextlib.suppress(KeyError):
+            self._selector.register(fd, events=EVENT_READ, data=recv_fn)
         if self.running:
             # interrupting selection to refresh selection targets
             self._kill_switch_tx.send(b"0")
 
-    def subscribe(self, filters: set[int] | None = None) -> SocketcanFd:
+    def subscribe(self, filters: set[int] | list[CanFilter] | None = None) -> SocketcanFd:
         """
         Subscribes to the bus; returns a socketcan-like socket that can be used
         with socketcan protocol.
         If filters is passed, only messages with requested filters will be forwarded.
+        Accepts either set[int] for exact matching or list[CanFilter] for mask-based filtering.
         """
         if self._use_stream:
             _ours, _theirs = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -238,7 +268,7 @@ class SocketcanServer:
             if self._bus is not None and self._bus.state == BusState.ERROR:
                 _logger.error("CAN bus server ended on can operation error: %s", exc)  # noqa: TRY400
 
-    def _run_rx(self) -> None:
+    def _run_rx(self) -> None:  # noqa: PLR0912
         """
         Listens forever to the bus and forwards messages to all consumers.
         """
@@ -257,14 +287,33 @@ class SocketcanServer:
             assert next_message is not None
             can_id = next_message.arbitration_id
             data = next_message.data
+            is_extended = next_message.is_extended_id
 
             for consumer in consumers:
                 sender, _, filters = consumer
-                if filters and can_id not in filters:
-                    continue
+                if filters:
+                    # Check if the message matches any of the filters
+                    matched = False
+                    for can_filter in filters:
+                        filter_can_id = can_filter["can_id"]
+                        filter_can_mask = can_filter["can_mask"]
+                        # Check the mask-based matching formula:
+                        # (can_id & can_mask) == (filter_can_id & can_mask)
+                        if (can_id & filter_can_mask) == (filter_can_id & filter_can_mask):
+                            # If extended flag is present in filter, check it
+                            if "extended" in can_filter:
+                                if is_extended == can_filter["extended"]:
+                                    matched = True
+                                    break
+                            else:
+                                # No extended flag in filter, matches any
+                                matched = True
+                                break
+                    if not matched:
+                        continue
 
                 try:
-                    sender(can_id, data, next_message.is_extended_id)  # type: ignore[arg-type]
+                    sender(can_id, data, next_message.is_extended_id, None)
                 except BrokenPipeError:
                     _logger.info("Client closed connection")
                     closed_connections.append(consumer)
@@ -339,7 +388,7 @@ class SocketcanServer:
                         # skipping, not sending to ourselves
                         continue
                     try:
-                        send_fn(msg.arbitration_id, msg.data, msg.is_extended_id)
+                        send_fn(msg.arbitration_id, msg.data, msg.is_extended_id, None)
                     except (BrokenPipeError, ConnectionResetError):
                         continue
                     except OSError as exc:
@@ -427,11 +476,14 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
                 filters = None
                 if filter_str := params.get("filters", [None])[0]:
                     try:
-                        filters = set(int(f, 0) for f in filter_str.split(","))
-                    except ValueError:
-                        self.send_response_and_content(
-                            "Invalid filters format, expected comma-separated CAN IDs", code=400
-                        )
+                        # Filters are URL-encoded JSON
+                        filters_json = unquote(filter_str)
+                        filters = json.loads(filters_json)
+                        # Validate that it's a list of filter dicts
+                        if not isinstance(filters, list):
+                            raise ValueError("Filters should be a list")
+                    except (json.JSONDecodeError, ValueError) as e:
+                        self.send_response_and_content(f"Invalid filters format: {e}", code=400)
                         return
 
                 self.send_response(101)
@@ -444,7 +496,11 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
                 _logger.info("Listening to socket with filters: %s", filters)
                 server.listen_to(sock, filters=filters)
                 _logger.info("Upgrading connection to socketcan")
-                # TODO: wait for socket to close
+                # Keep the connection open for socketcan communication
+                # The SocketcanServer's TX/RX threads will handle the actual communication
+                # We need to keep the handler from returning to prevent the socket from being closed.
+                # Use a long timeout to support long-running connections (e.g., benchmarks)
+                # TODO: Properly implement HTTP upgrade by detaching the socket
                 time.sleep(1000)
 
             elif path == "/unsubscribe":
@@ -536,7 +592,8 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
         Stops the daemon thread.
         """
         self._httpd.shutdown()
-        self._httpd_thread.join()
+        if self._httpd_thread is not None:
+            self._httpd_thread.join()
         for channel, server in self._servers.items():
             _logger.info("Stopping socketcanserver on channel %s", channel)
             server.stop()
