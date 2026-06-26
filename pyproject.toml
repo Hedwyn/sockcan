@@ -15,7 +15,7 @@ dependencies = []
 
 [project.optional-dependencies]
 daemon = ["click", "python-can"]
-test = ["hypothesis", "pytest", "python-can"]
+test = ["hypothesis", "pytest", "python-can", "cantools"]
 docs = ["mkdocs", "mkdocs-material"]
 
 [project.urls]
