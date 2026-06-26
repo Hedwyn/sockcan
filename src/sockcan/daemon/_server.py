@@ -66,6 +66,30 @@ def _normalize_filters(
     raise TypeError(f"Unsupported filter type: {type(filters)}")
 
 
+def _frame_matches(
+    filters: list[CanFilter] | None,
+    can_id: int,
+    is_extended: bool,
+) -> bool:
+    """
+    Returns whether a frame passes a consumer's filter set.
+
+    A consumer with no filters accepts every frame. Otherwise the frame is
+    accepted as soon as it matches any single filter, using python-can's
+    mask-based formula ``(can_id & can_mask) == (filter_can_id & can_mask)``.
+    When a filter carries an ``extended`` flag, the frame's extended bit must
+    match it too; a filter without that flag matches frames of either kind.
+    """
+    if not filters:
+        return True
+    for can_filter in filters:
+        filter_can_mask = can_filter["can_mask"]
+        if (can_id & filter_can_mask) == (can_filter["can_id"] & filter_can_mask):
+            if "extended" not in can_filter or is_extended == can_filter["extended"]:
+                return True
+    return False
+
+
 ENDPOINT_NOT_CONNECTED_ERRNO = errno.ENOTCONN
 CONNECTION_REFUSED_ERRRNO = errno.ECONNREFUSED
 
@@ -291,26 +315,8 @@ class SocketcanServer:
 
             for consumer in consumers:
                 sender, _, filters = consumer
-                if filters:
-                    # Check if the message matches any of the filters
-                    matched = False
-                    for can_filter in filters:
-                        filter_can_id = can_filter["can_id"]
-                        filter_can_mask = can_filter["can_mask"]
-                        # Check the mask-based matching formula:
-                        # (can_id & can_mask) == (filter_can_id & can_mask)
-                        if (can_id & filter_can_mask) == (filter_can_id & filter_can_mask):
-                            # If extended flag is present in filter, check it
-                            if "extended" in can_filter:
-                                if is_extended == can_filter["extended"]:
-                                    matched = True
-                                    break
-                            else:
-                                # No extended flag in filter, matches any
-                                matched = True
-                                break
-                    if not matched:
-                        continue
+                if not _frame_matches(filters, can_id, is_extended):
+                    continue
 
                 try:
                     sender(can_id, data, next_message.is_extended_id, None)
@@ -383,9 +389,19 @@ class SocketcanServer:
 
                 # short-circuiting messages between our consumers
                 for send_fn, fd, filters in consumers:
-                    _ = filters
                     if fd is fileobj:
                         # skipping, not sending to ourselves
+                        continue
+                    if not _frame_matches(
+                        filters,
+                        msg.arbitration_id,
+                        msg.is_extended_id,
+                    ):
+                        # Honour the destination consumer's filters on the
+                        # consumer-to-consumer loopback path too, just like the
+                        # real-bus RX path does. Without this, a consumer that
+                        # subscribed with filters still receives every frame any
+                        # other consumer sends.
                         continue
                     try:
                         send_fn(msg.arbitration_id, msg.data, msg.is_extended_id, None)
