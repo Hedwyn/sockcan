@@ -18,15 +18,27 @@ Benchmarks can be run with `python -m sockcan.benchmarks`:
 
 ```shell
 python -m sockcan.benchmarks --help
-Usage: python -m sockcan.benchmarks [OPTIONS]
-
-  Runs the benchmarks interactively
+Usage: python -m sockcan.benchmarks [OPTIONS] COMMAND [ARGS]...
 
 Options:
-  -r, --rounds INTEGER
-  -b, --batch-size INTEGER
-  -v, --verbose
-  --help                    Show this message and exit.
+  --help  Show this message and exit.
+
+Commands:
+  daemon  Benchmarks all 4 scenarios: direct kernel vs userspace daemon,...
+  kernel  Benchmarks python-can vs sockcan with direct kernel...
+```
+
+### Kernel benchmark
+Compares python-can and sockcan on direct kernel communications:
+```shell
+python -m sockcan.benchmarks kernel --rounds 200 --batch-size 100
+```
+
+### Daemon benchmark
+Compares all 4 scenarios: python-can + sockcan on both direct kernel and userspace daemon.
+Requires vcan0 and uses a virtual bus (no hardware needed):
+```shell
+python -m sockcan.benchmarks daemon --rounds 100 --batch-size 50 --port 18765
 ```
 
 ## Running tests
