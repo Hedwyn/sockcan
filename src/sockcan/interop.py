@@ -10,13 +10,14 @@ from __future__ import annotations
 import atexit
 import logging
 import platform
+import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Self
 
 import can
 from can.interfaces import BACKENDS
-from can.typechecking import CanFilter
+from can.typechecking import CanFilter, CanFilters
 
 from sockcan import connect_to_socketcan
 from sockcan._protocol import SocketcanConfig, SocketcanFd, build_recv_func, build_send_func
@@ -26,7 +27,7 @@ from sockcan.daemon._server import BusParameters, SocketcanDaemon
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from can.typechecking import CanFilter, CanFilters, Channel
+    from can.typechecking import Channel
 
 
 _logger = logging.getLogger(__name__)
@@ -106,7 +107,7 @@ class UserspaceSocketcanBus:
         **kwargs: object,
     ) -> None:
         _ = kwargs
-        self._filters: list[CanFilter] = list(can_filters or [])
+        self._filters: CanFilters | None = None
         # Note: actual socket is kept under .socket in SocketcanBus
         self._config = SocketcanConfig(channel=str(channel))
         if socket is None:
@@ -119,9 +120,26 @@ class UserspaceSocketcanBus:
             use_native_timestamps=False,
             is_stream=_global_config.mode == "daemon",
         )
+        self.set_filters(can_filters)
 
     def fileno(self) -> int:
         return self.socket.fileno()
+
+    @property
+    def filters(self) -> CanFilters | None:
+        return self._filters
+
+    @filters.setter
+    def filters(self, filters: CanFilters | None) -> None:
+        self.set_filters(filters)
+
+    def set_filters(self, filters: CanFilters | None = None) -> None:
+        self._filters = filters or None
+        if self._filters:
+            warnings.warn(
+                "Filters are stored but not applied: hardware/software filtering is not implemented yet.",
+                stacklevel=2,
+            )
 
     def shutdown(self) -> None:
         self.socket.close()

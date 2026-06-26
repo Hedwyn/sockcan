@@ -165,8 +165,6 @@ def _socketcan_recv(
     Unpacks the data, arbitration ID and timestamp andf leaves all the other metadata undecoded.
     Metadata will only be decoded on access.
     """
-    if timeout is not None and timeout > 0:
-        raise NotImplementedError
     # Fetching the Arb ID, DLC and Data
     try:
         cf, ancillary_data, *_ = recv_fn(_canfd_mtu, _ancillary_data_size)
@@ -216,8 +214,6 @@ def _socketcan_recv_stream(
     Unpacks the data, arbitration ID and timestamp andf leaves all the other metadata undecoded.
     Metadata will only be decoded on access.
     """
-    if timeout is not None and timeout > 0:
-        raise NotImplementedError
     # Fetching the Arb ID, DLC and Data
     try:
         cf = recv_fn(_msg_size)
@@ -238,7 +234,7 @@ def _socketcan_recv_stream(
     return CanMessage(can_id, data, is_extended, timestamp)
 
 
-type RecvFn = Callable[[], CanMessage]
+type RecvFn = Callable[[float | None], CanMessage]
 
 
 def build_recv_func(
@@ -285,6 +281,7 @@ def _socketcan_send(
     arbitration_id: int,
     data: bytes | bytearray,
     is_extended: bool = False,  # noqa: FBT001, FBT002
+    timeout: float | None = None,
 ) -> None:
     """
     Sends a can message specified with `data` and `arbitration_id`
@@ -298,6 +295,7 @@ def _socketcan_send(
 def _socketcan_send_msg(
     send_fn: SendMsgFn,
     message: CanMessageProtocol,
+    timeout: float | None = None,
 ) -> None:
     """
     Sends a can message specified with `data` and `arbitration_id`
@@ -313,8 +311,8 @@ def _socketcan_send_msg(
 
 # SendFn -> to pass directly arbitration_id, data and extended flag as args
 # MessageSendFn -> when passing a container implementing CanMessageProtocol to the sender
-type SendFn = Callable[[int, bytes, bool], None]
-type MessageSendFn = Callable[[CanMessageProtocol], None]
+type SendFn = Callable[[int, bytes | bytearray, bool, float | None], None]
+type MessageSendFn = Callable[[CanMessageProtocol, float | None], None]
 
 
 @overload
