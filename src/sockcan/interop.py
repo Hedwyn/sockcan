@@ -33,6 +33,30 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 
+def _matches_filters(
+    filters: list[CanFilter],
+    can_id: int,
+    is_extended: bool,  # noqa: FBT001
+) -> bool:
+    """
+    Client-side equivalent of the daemon's per-consumer filter matching.
+
+    An empty filter set accepts every frame. Otherwise a frame is accepted as
+    soon as it matches any single filter, using python-can's mask-based formula
+    ``(can_id & can_mask) == (filter_can_id & can_mask)``. A filter carrying an
+    ``extended`` flag additionally requires the frame's extended bit to match it;
+    a filter without that flag matches frames of either kind.
+    """
+    if not filters:
+        return True
+    for can_filter in filters:
+        mask = can_filter["can_mask"]
+        if (can_id & mask) == (can_filter["can_id"] & mask):
+            if "extended" not in can_filter or is_extended == can_filter["extended"]:
+                return True
+    return False
+
+
 class FastSocketcanBus:
     """
     A socketcan bus pseudo-implementation that performs much faster
@@ -132,13 +156,35 @@ class UserspaceSocketcanBus:
             socket = self._get_socket(channel, can_filters)
         self.socket = socket
         self.send = build_send_func(self.socket, expects_msg_cls=True)
-        self.recv = build_recv_func(
+        self._base_recv = build_recv_func(
             self.socket,
             use_native_timestamps=False,
             is_stream=_global_config.mode == "daemon",
         )
+        # Filtering is enforced client-side in `recv` (see `set_filters`); the
+        # daemon-side filters passed at subscribe time are only a best-effort
+        # traffic reducer, never the source of truth.
+        self.recv = self._recv
         # Store the python-can filters
         self._can_filters = list(can_filters or [])
+
+    def _recv(self, timeout: float | None = None) -> object:
+        """
+        Returns the next frame matching the current filters.
+
+        Filtering happens here, client-side, rather than by tearing down and
+        re-subscribing the socket. ``set_filters`` only swaps ``self._can_filters``
+        in place, so an in-flight read is never disrupted and no frames are lost
+        across a filter change — mirroring the kernel SocketCAN bus, whose filters
+        are reconfigured in place via ``setsockopt``. Non-matching frames are
+        dropped and the read is retried.
+        """
+        while True:
+            msg = self._base_recv(timeout)
+            if msg is None:
+                return None
+            if _matches_filters(self._can_filters, msg.arbitration_id, msg.is_extended_id):
+                return msg
 
     def fileno(self) -> int:
         return self.socket.fileno()
@@ -153,27 +199,17 @@ class UserspaceSocketcanBus:
 
     def set_filters(self, filters: CanFilters | None = None) -> None:
         """
-        Sets the filters for this bus.
-        Passes python-can filter format directly to the daemon.
-        If filters are changed after initialization, the socket is recreated with the new filters.
-        Supports mask-based filtering as per python-can specification.
+        Sets the filters for this bus, in place and without disrupting the socket.
+
+        The filters are stored and enforced client-side by ``recv``; the socket is
+        *not* recreated. Recreating it (the previous behaviour) raced the reading
+        thread — closing the fd under a blocked ``recv`` raised ``EBADF`` — and
+        dropped any frames in flight during the reconnect, which is fatal for
+        watchdog-driven consumers. Updating only the stored options mirrors the
+        kernel SocketCAN bus, whose filters change in place via ``setsockopt``.
+        Supports mask-based filtering as per the python-can specification.
         """
-        # Convert to list for comparison
-        new_filters = list(filters or [])
-
-        # Store the python-can format filters
-        self._can_filters = new_filters
-
-        # Recreate the socket with new filters
-        self.socket.close()
-        self.socket = self._get_socket(self._channel, filters)
-        # Rebuild send and recv functions with the new socket
-        self.send = build_send_func(self.socket, expects_msg_cls=True)
-        self.recv = build_recv_func(
-            self.socket,
-            use_native_timestamps=False,
-            is_stream=_global_config.mode == "daemon",
-        )
+        self._can_filters = list(filters or [])
 
     def shutdown(self) -> None:
         self.socket.close()
