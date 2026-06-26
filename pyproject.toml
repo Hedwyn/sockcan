@@ -52,4 +52,6 @@ mypyc_modules = [
   { import_path = "sockcan.transcoders._common" },
   { import_path = "sockcan.transcoders._decoders" },
   { import_path = "sockcan.transcoders._encoders" },
+  { import_path = "sockcan.daemon._server" },
+  { import_path = "sockcan.daemon._client" },
 ]
