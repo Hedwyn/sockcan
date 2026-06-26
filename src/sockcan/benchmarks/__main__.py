@@ -7,6 +7,8 @@ Runs benchmarks against python-can.
 
 from __future__ import annotations
 
+import pstats
+
 import click
 
 from sockcan._protocol import (
@@ -17,7 +19,7 @@ from sockcan._protocol import (
 )
 from sockcan.fixtures import vcan_bus
 
-from ._bench import bench, rx_batch_gen, tx_batch_gen
+from ._bench import bench, bench_rx, rx_batch_gen, tx_batch_gen
 from ._bench_daemon import DAEMON_BATCH_SIZE, bench_e2e
 
 
@@ -29,23 +31,30 @@ def cli() -> None:
 @cli.command()
 @click.option("-r", "--rounds", default=200, type=int)
 @click.option("-b", "--batch-size", default=100, type=int)
-def kernel(*, rounds: int, batch_size: int) -> None:
+@click.option("-v", "--verbose", is_flag=True)
+def kernel(*, rounds: int, batch_size: int, verbose: bool) -> None:
     """Benchmarks python-can vs sockcan with direct kernel communications."""
     with vcan_bus() as tx_bus, vcan_bus() as rx_bus:
-        _, pycan_rx = bench(
-            tx_batch_gen(tx_bus.send, batch_size=batch_size),
-            rx_batch_gen(rx_bus.recv, batch_size=batch_size),
-            rounds,
+        python_can_profile = bench_rx(
+            rx_bus.recv,
+            tx_bus,
+            batch_size=batch_size,
+            total_rounds=rounds,
         )
+
+        if verbose:
+            python_can_profile.print_stats()
 
         sockcan_sock = connect_to_socketcan(SocketcanConfig(channel="vcan0"))
-        _, sockcan_rx = bench(
-            tx_batch_gen(tx_bus.send, batch_size=batch_size),
-            rx_batch_gen(build_recv_func(sockcan_sock), batch_size=batch_size),
-            rounds,
-        )
+        recv_fn = build_recv_func(sockcan_sock)
+        sockcan_profile = bench_rx(recv_fn, tx_bus, batch_size=batch_size, total_rounds=rounds)
+        if verbose:
+            sockcan_profile.print_stats()
 
-    click.echo(f"RX: sockcan {pycan_rx / sockcan_rx:.2f}x faster than python-can")
+        python_can_stats = pstats.Stats(python_can_profile)
+        sockcan_stats = pstats.Stats(sockcan_profile)
+        ratio = python_can_stats.total_tt / sockcan_stats.total_tt  # type: ignore[attr-defined]
+        click.echo(f"Performed {ratio:.02f} x faster than python-can")
 
 
 @cli.command()
