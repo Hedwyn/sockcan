@@ -16,8 +16,10 @@ import errno
 import json
 import logging
 import os
+import platform
 import socket
 import struct
+import warnings
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -217,10 +219,24 @@ class SocketcanServer:
         If filters is passed, only messages with requested filters will be forwarded.
         Accepts either set[int] for exact matching or list[CanFilter] for mask-based filtering.
         """
+        # Windows sanity checks:
+        # Modern windows *do* have AF_UNIX socket types.
+        # However, 1) this not true for older versions and 2)
+        # a lot of python distributions do not include it at build time
+        # making this unusuable from Python even if the system support it
+        # (starting with the Python exe shipped by uv itself)
         if self._use_stream:
             _ours, _theirs = socket.socketpair(socket.AF_INET, socket.SOCK_STREAM)
         else:
-            _ours, _theirs = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
+            addr_family = socket.AF_UNIX
+            if platform.system() == "Windows" and not hasattr(socket, "AF_UNIX"):
+                msg = (
+                    "No support for AF_UNIX sockets: your Windows system might be too old, or "
+                    "your python distribution might have been compiled without support for it. "
+                    "Using AF_INET instead."
+                )
+                warnings.warn(msg, stacklevel=2)
+            _ours, _theirs = socket.socketpair(addr_family, socket.SOCK_DGRAM)
         ours = cast("SocketcanFd", _ours)
         theirs = cast("SocketcanFd", _theirs)
         self.listen_to(ours, filters=filters)
