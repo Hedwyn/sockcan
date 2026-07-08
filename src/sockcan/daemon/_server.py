@@ -18,7 +18,6 @@ import logging
 import os
 import socket
 import struct
-import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -219,7 +218,7 @@ class SocketcanServer:
         Accepts either set[int] for exact matching or list[CanFilter] for mask-based filtering.
         """
         if self._use_stream:
-            _ours, _theirs = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+            _ours, _theirs = socket.socketpair(socket.AF_INET, socket.SOCK_STREAM)
         else:
             _ours, _theirs = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
         ours = cast("SocketcanFd", _ours)
