@@ -10,14 +10,12 @@ from __future__ import annotations
 import atexit
 import logging
 import platform
-import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, Self
 
 import can
 from can.interfaces import BACKENDS
-from can.typechecking import CanFilter, CanFilters
 
 from sockcan import connect_to_socketcan
 from sockcan._protocol import SocketcanConfig, SocketcanFd, build_recv_func, build_send_func
@@ -27,7 +25,7 @@ from sockcan.daemon._server import BusParameters, SocketcanDaemon
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-    from can.typechecking import Channel
+    from can.typechecking import CanFilter, CanFilters, Channel
 
 
 _logger = logging.getLogger(__name__)
@@ -51,9 +49,10 @@ def _matches_filters(
         return True
     for can_filter in filters:
         mask = can_filter["can_mask"]
-        if (can_id & mask) == (can_filter["can_id"] & mask):
-            if "extended" not in can_filter or is_extended == can_filter["extended"]:
-                return True
+        if (
+            (can_id & mask) == (can_filter["can_id"] & mask) and "extended" not in can_filter
+        ) or is_extended == can_filter.get("extended", False):
+            return True
     return False
 
 
@@ -81,7 +80,7 @@ class FastSocketcanBus:
 
     @property
     def filters(self) -> CanFilters | None:
-        return self._can_filters if self._can_filters else None
+        return self._can_filters or None
 
     @filters.setter
     def filters(self, filters: CanFilters | None) -> None:
@@ -191,7 +190,7 @@ class UserspaceSocketcanBus:
 
     @property
     def filters(self) -> CanFilters | None:
-        return self._can_filters if self._can_filters else None
+        return self._can_filters or None
 
     @filters.setter
     def filters(self, filters: CanFilters | None) -> None:
