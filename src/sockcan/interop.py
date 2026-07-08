@@ -17,10 +17,20 @@ from typing import TYPE_CHECKING, Literal, Self
 import can
 from can.interfaces import BACKENDS
 
-from sockcan import connect_to_socketcan
-from sockcan._protocol import SocketcanConfig, SocketcanFd, build_recv_func, build_send_func
-from sockcan.daemon import SocketcanServer, connect_socketcan_client, ping_daemon
-from sockcan.daemon._server import BusParameters, SocketcanDaemon
+from sockcan import (
+    SocketcanConfig,
+    SocketcanFd,
+    build_recv_func,
+    build_send_func,
+    connect_to_socketcan,
+)
+from sockcan.daemon import (
+    BusParameters,
+    SocketcanDaemon,
+    SocketcanServer,
+    connect_socketcan_client,
+    ping_daemon,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Generator

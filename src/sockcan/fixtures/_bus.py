@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 import can
 import pytest
+from can import CanOperationError
 from can.interfaces.socketcan import SocketcanBus
 
 if TYPE_CHECKING:
@@ -34,10 +35,11 @@ def has_vcan(channel: str = "vcan0") -> bool:
     Whether vcan0 is available on the system.
     """
     try:
-        with vcan_bus(channel=channel):
+        with vcan_bus(channel=channel) as bus:
+            bus.send(can.Message(arbitration_id=0, data=b""))
             return True
 
-    except OSError:
+    except (OSError, CanOperationError):
         return False
 
 
