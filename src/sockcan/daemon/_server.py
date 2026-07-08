@@ -213,14 +213,15 @@ class SocketcanServer:
         self,
         fd: SocketcanFd,
         filters: set[int] | list[CanFilter] | None = None,
+        *,
+        force_stream: bool = False,
     ) -> None:
         # Normalize filters to list[CanFilter] format
         normalized_filters = _normalize_filters(filters)
+        use_stream = self._use_stream or force_stream
 
         # sanity checks
-        if self._use_stream and fd.type != socket.SOCK_STREAM:
-            raise RuntimeError("Server is configured to stream mode, cannot listen to DGRAM socket")
-        if not self._use_stream and fd.type != socket.SOCK_DGRAM:
+        if not use_stream and fd.type != socket.SOCK_DGRAM:
             raise RuntimeError(
                 "Server is configured to DGRAM mode, cannot listen to SOCK_STREAM socket",
             )
@@ -229,7 +230,7 @@ class SocketcanServer:
         recv_fn = build_recv_func(
             fd,
             use_native_timestamps=self.use_native_timestamps,
-            is_stream=self._use_stream,
+            is_stream=use_stream,
         )
         self._consumers.append(_Consumer(send_fn, fd, normalized_filters))
         # KeyError is expected if Socket is already registered (e.g., HTTP upgrade socket)
@@ -253,6 +254,7 @@ class SocketcanServer:
         # a lot of python distributions do not include it at build time
         # making this unusuable from Python even if the system support it
         # (starting with the Python exe shipped by uv itself)
+        force_stream = False
         if self._use_stream:
             _ours, _theirs = socket.socketpair(socket.AF_INET, socket.SOCK_STREAM)
         elif platform.system() == "Windows" and not hasattr(socket, "AF_UNIX"):
@@ -263,11 +265,12 @@ class SocketcanServer:
             )
             warnings.warn(msg, stacklevel=2)
             _ours, _theirs = _windows_socket_pair()
+            force_stream = True
         else:
             _ours, _theirs = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
         ours = cast("SocketcanFd", _ours)
         theirs = cast("SocketcanFd", _theirs)
-        self.listen_to(ours, filters=filters)
+        self.listen_to(ours, filters=filters, force_stream=force_stream)
         return theirs
 
     @classmethod
