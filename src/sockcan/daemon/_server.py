@@ -232,10 +232,10 @@ class SocketcanServer:
                 msg = (
                     "No support for AF_UNIX sockets: your Windows system might be too old, or "
                     "your python distribution might have been compiled without support for it. "
-                    "Using AF_INET instead."
+                    "Using SOCK_STREAM instead."
                 )
                 warnings.warn(msg, stacklevel=2)
-                addr_family = socket.AF_INET
+                addr_family = socket.SOCK_STREAM
             else:
                 addr_family = socket.AF_UNIX
             _ours, _theirs = socket.socketpair(addr_family, socket.SOCK_DGRAM)
