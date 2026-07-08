@@ -228,7 +228,6 @@ class SocketcanServer:
         if self._use_stream:
             _ours, _theirs = socket.socketpair(socket.AF_INET, socket.SOCK_STREAM)
         else:
-            addr_family = socket.AF_UNIX
             if platform.system() == "Windows" and not hasattr(socket, "AF_UNIX"):
                 msg = (
                     "No support for AF_UNIX sockets: your Windows system might be too old, or "
@@ -236,6 +235,9 @@ class SocketcanServer:
                     "Using AF_INET instead."
                 )
                 warnings.warn(msg, stacklevel=2)
+                addr_family = socket.AF_INET
+            else:
+                addr_family = socket.AF_UNIX
             _ours, _theirs = socket.socketpair(addr_family, socket.SOCK_DGRAM)
         ours = cast("SocketcanFd", _ours)
         theirs = cast("SocketcanFd", _theirs)
