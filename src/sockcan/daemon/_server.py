@@ -70,6 +70,7 @@ def _normalize_filters(
 def _frame_matches(
     filters: list[CanFilter] | None,
     can_id: int,
+    *,
     is_extended: bool,
 ) -> bool:
     """
@@ -85,10 +86,37 @@ def _frame_matches(
         return True
     for can_filter in filters:
         filter_can_mask = can_filter["can_mask"]
-        if (can_id & filter_can_mask) == (can_filter["can_id"] & filter_can_mask):
-            if "extended" not in can_filter or is_extended == can_filter["extended"]:
-                return True
+        if (
+            (can_id & filter_can_mask) == (can_filter["can_id"] & filter_can_mask)
+            and "extended" not in can_filter
+        ) or is_extended == can_filter.get("extended", False):
+            return True
     return False
+
+
+def _windows_socket_pair(
+    sock_type: socket.SocketKind = socket.SOCK_DGRAM,
+) -> tuple[socket.socket, socket.socket]:
+    """
+    Emulate socket.socketpair() on Windows for SOCK_DGRAM (and SOCK_STREAM),
+    since the native emulation in the socket module only supports SOCK_STREAM.
+
+    Returns a tuple of two connected sockets (a, b) on 127.0.0.1.
+    """
+    conn1 = socket.socket(socket.AF_INET, sock_type)
+    conn2 = socket.socket(socket.AF_INET, sock_type)
+
+    try:
+        conn1.bind(("127.0.0.1", 0))
+        conn2.bind(("127.0.0.1", 0))
+
+        conn1.connect(conn2.getsockname())
+        conn2.connect(conn1.getsockname())
+    except OSError:
+        conn1.close()
+        conn2.close()
+        raise
+    return conn1, conn2
 
 
 ENDPOINT_NOT_CONNECTED_ERRNO = errno.ENOTCONN
@@ -227,18 +255,16 @@ class SocketcanServer:
         # (starting with the Python exe shipped by uv itself)
         if self._use_stream:
             _ours, _theirs = socket.socketpair(socket.AF_INET, socket.SOCK_STREAM)
+        elif platform.system() == "Windows" and not hasattr(socket, "AF_UNIX"):
+            msg = (
+                "No support for AF_UNIX sockets: your Windows system might be too old, or "
+                "your python distribution might have been compiled without support for it. "
+                "Using AF_INET instead."
+            )
+            warnings.warn(msg, stacklevel=2)
+            _ours, _theirs = _windows_socket_pair()
         else:
-            if platform.system() == "Windows" and not hasattr(socket, "AF_UNIX"):
-                msg = (
-                    "No support for AF_UNIX sockets: your Windows system might be too old, or "
-                    "your python distribution might have been compiled without support for it. "
-                    "Using AF_INET instead."
-                )
-                warnings.warn(msg, stacklevel=2)
-                addr_family = socket.AF_INET
-            else:
-                addr_family = socket.AF_UNIX
-            _ours, _theirs = socket.socketpair(addr_family, socket.SOCK_DGRAM)
+            _ours, _theirs = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
         ours = cast("SocketcanFd", _ours)
         theirs = cast("SocketcanFd", _theirs)
         self.listen_to(ours, filters=filters)
@@ -332,7 +358,7 @@ class SocketcanServer:
 
             for consumer in consumers:
                 sender, _, filters = consumer
-                if not _frame_matches(filters, can_id, is_extended):
+                if not _frame_matches(filters, can_id, is_extended=is_extended):
                     continue
 
                 try:
@@ -412,7 +438,7 @@ class SocketcanServer:
                     if not _frame_matches(
                         filters,
                         msg.arbitration_id,
-                        msg.is_extended_id,
+                        is_extended=msg.is_extended_id,
                     ):
                         # Honour the destination consumer's filters on the
                         # consumer-to-consumer loopback path too, just like the
