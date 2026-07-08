@@ -76,6 +76,7 @@ def tx_sock(request: FixtureRequest) -> Generator[SocketcanFd, None, None]:
 
 
 @pytest.mark.parametrize("rx_sock", ["sockcan"], indirect=True)
+@skip_if_no_vcan()
 def test_sock_sanity(rx_sock: Socket) -> None:
     assert isinstance(rx_sock, socket.socket)
 

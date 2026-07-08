@@ -25,7 +25,7 @@ from sockcan.daemon import (
     SocketcanServer,
     connect_socketcan_client,
 )
-from sockcan.fixtures import can_messages, rx_can_bus, tx_can_bus, vcan_bus
+from sockcan.fixtures import can_messages, rx_can_bus, skip_if_no_vcan, tx_can_bus, vcan_bus
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -104,6 +104,7 @@ def virtual_socketcan_server() -> Generator[SocketcanServer, None, None]:
 @given(can_messages=st.lists(can_messages(), min_size=10, max_size=100))
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=10)
 @parametrize_stream_modes
+@skip_if_no_vcan()
 def test_single_consumer_rx(
     can_messages: list[PyCanMessage],
     tx_can_bus: SocketcanBus,
@@ -125,6 +126,7 @@ def test_single_consumer_rx(
 @given(can_messages=st.lists(can_messages(), min_size=10, max_size=100))
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=10)
 @parametrize_stream_modes
+@skip_if_no_vcan()
 def test_single_consumer_tx(
     can_messages: list[PyCanMessage],
     rx_can_bus: SocketcanBus,
@@ -148,6 +150,7 @@ def test_single_consumer_tx(
 @given(can_messages=st.lists(can_messages(), min_size=10, max_size=100))
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=1)
 @parametrize_stream_modes
+@skip_if_no_vcan()
 def test_socketcan_bus_bidir(
     can_messages: list[PyCanMessage],
     *,
@@ -191,6 +194,7 @@ def test_socketcan_bus_bidir(
 @given(can_messages=st.lists(can_messages(), min_size=2, max_size=2))
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=1)
 @parametrize_stream_modes
+@skip_if_no_vcan()
 def test_socketcan_bus_buffering(
     can_messages: list[PyCanMessage],
     *,
@@ -279,6 +283,7 @@ def test_virtual_socketcan_bus(
     deadline=1000,
 )
 @pytest.mark.parametrize("virtual", [False, True])
+@skip_if_no_vcan()
 def test_socketcan_bus_daemon(
     can_messages: list[PyCanMessage],
     *,
@@ -309,6 +314,7 @@ def test_socketcan_bus_daemon(
 
 
 @pytest.mark.parametrize("use_stream", [False, True])
+@skip_if_no_vcan()
 def test_socketcan_server_with_filters(
     tx_can_bus: SocketcanBus,
     *,
