@@ -165,10 +165,11 @@ class UserspaceSocketcanBus:
             socket = self._get_socket(channel, can_filters)
         self.socket = socket
         self.send = build_send_func(self.socket, expects_msg_cls=True)
+        is_stream = _global_config.mode == "daemon" or not hasattr(socket, "AF_UNIX")
         self._base_recv = build_recv_func(
             self.socket,
             use_native_timestamps=False,
-            is_stream=_global_config.mode == "daemon",
+            is_stream=is_stream,
         )
         # Filtering is enforced client-side in `recv` (see `set_filters`); the
         # daemon-side filters passed at subscribe time are only a best-effort
