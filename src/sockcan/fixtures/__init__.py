@@ -9,15 +9,25 @@ from __future__ import annotations
 
 from can.interfaces.socketcan import SocketcanBus
 
-from ._bus import has_vcan, rx_can_bus, skip_if_no_vcan, tx_can_bus, vcan_bus
+from ._bus import (
+    has_vcan,
+    is_windows,
+    rx_can_bus,
+    skip_if_no_vcan,
+    skip_if_windows,
+    tx_can_bus,
+    vcan_bus,
+)
 from ._messages import can_messages
 
 __all__ = [
     "SocketcanBus",
     "can_messages",
     "has_vcan",
+    "is_windows",
     "rx_can_bus",
     "skip_if_no_vcan",
+    "skip_if_windows",
     "tx_can_bus",
     "vcan_bus",
 ]
