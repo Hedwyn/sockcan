@@ -94,15 +94,20 @@ def _frame_matches(
     return False
 
 
-def _windows_socket_pair(
+def _inet_socket_pair(
     sock_type: socket.SocketKind = socket.SOCK_DGRAM,
 ) -> tuple[socket.socket, socket.socket]:
     """
-    Emulate socket.socketpair() on Windows for SOCK_DGRAM (and SOCK_STREAM),
-    since the native emulation in the socket module only supports SOCK_STREAM.
+    Emulate socket.socketpair() for AF_INET, for SOCK_DGRAM (and SOCK_STREAM),
+    since socket.socketpair() only supports AF_INET natively as a Windows
+    fallback for SOCK_STREAM; AF_UNIX-backed platforms (e.g. Linux) reject
+    AF_INET outright.
 
     Returns a tuple of two connected sockets (a, b) on 127.0.0.1.
     """
+    if sock_type == socket.SOCK_STREAM:
+        return _inet_stream_socket_pair()
+
     conn1 = socket.socket(socket.AF_INET, sock_type)
     conn2 = socket.socket(socket.AF_INET, sock_type)
 
@@ -116,6 +121,29 @@ def _windows_socket_pair(
         conn1.close()
         conn2.close()
         raise
+    return conn1, conn2
+
+
+def _inet_stream_socket_pair() -> tuple[socket.socket, socket.socket]:
+    """
+    Emulate socket.socketpair() for AF_INET/SOCK_STREAM.
+
+    SOCK_STREAM has no symmetric bind+connect trick like SOCK_DGRAM: a
+    merely-bound socket isn't listening, so connecting to it is refused.
+    Use a short-lived listener to accept one connection instead.
+    """
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    conn1 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        conn1.connect(listener.getsockname())
+        conn2, _ = listener.accept()
+    except OSError:
+        conn1.close()
+        raise
+    finally:
+        listener.close()
     return conn1, conn2
 
 
@@ -256,7 +284,7 @@ class SocketcanServer:
         # (starting with the Python exe shipped by uv itself)
         force_stream = False
         if self._use_stream:
-            _ours, _theirs = socket.socketpair(socket.AF_INET, socket.SOCK_STREAM)
+            _ours, _theirs = _inet_socket_pair(socket.SOCK_STREAM)
         elif platform.system() == "Windows" and not hasattr(socket, "AF_UNIX"):
             msg = (
                 "No support for AF_UNIX sockets: your Windows system might be too old, or "
@@ -264,7 +292,7 @@ class SocketcanServer:
                 "Using AF_INET instead."
             )
             warnings.warn(msg, stacklevel=2)
-            _ours, _theirs = _windows_socket_pair()
+            _ours, _theirs = _inet_socket_pair()
             force_stream = True
         else:
             _ours, _theirs = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
@@ -331,7 +359,7 @@ class SocketcanServer:
         """
         try:
             self._run_rx()
-        except can.CanOperationError as exc:
+        except (can.CanOperationError, OSError, ValueError) as exc:
             # this path can be taken when closing the bus handle
             # on user side.
             # It should only be considered an error if the bus is in an error state.
@@ -387,7 +415,7 @@ class SocketcanServer:
         try:
             self._run_tx()
 
-        except (can.CanOperationError, struct.error) as exc:
+        except (can.CanOperationError, struct.error, ValueError) as exc:
             # this path can be taken when closing the bus handle
             # on user side.
             # It should only be considered an error if the bus is in an error state.
