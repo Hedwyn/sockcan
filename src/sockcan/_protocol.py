@@ -49,12 +49,9 @@ def get_received_ancillary_buf_size() -> int:
     """
     Ancillary data size is platform dependant
     """
-    try:
-        from socket import CMSG_SPACE  # noqa: PLC0415
-
-        return CMSG_SPACE(RECEIVED_TIMESTAMP_STRUCT.size)
-    except ImportError:
+    if (cmsg_space := getattr(socket, "CMSG_SPACE", None)) is None:
         return 0
+    return cmsg_space(RECEIVED_TIMESTAMP_STRUCT.size)
 
 
 class LoopbackMode(Enum):
@@ -251,7 +248,11 @@ def build_recv_func(
     if is_stream:
         return partial(_socketcan_recv_stream, fd.recv)
 
-    return partial(_socketcan_recv, fd.recvmsg, _ancillary_data_size=ancillary_data_size)
+    recvmsg = getattr(fd, "recvmsg", None)
+    if recvmsg is None:
+        raise SystemError("recvmsg not available on your system")
+
+    return partial(_socketcan_recv, recvmsg, _ancillary_data_size=ancillary_data_size)
 
 
 @lru_cache(maxsize=1024)
