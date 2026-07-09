@@ -8,6 +8,7 @@ Entrypoints for both server and client-side utilities.
 from __future__ import annotations
 
 import logging
+from time import monotonic
 
 import click
 
@@ -54,12 +55,13 @@ def run_daemon(
 @daemon.command()
 @click.option("-ip", "--host-ip", default="localhost", type=str)
 @click.option("-p", "--port", default=8000, type=int)
-def client(*, host_ip: str, port: int) -> None:
+@click.option("-c", "--channel", default="vcan0", type=str)
+def client(*, host_ip: str, port: int, channel: str) -> None:
     """
     Connects the daemon and show all received CAN messages.
     """
     logging.basicConfig(level=logging.INFO)
-    sock = connect_socketcan_client(host=host_ip, port=port, channel="vcan0")
+    sock = connect_socketcan_client(host=host_ip, port=port, channel=channel)
     click.echo("> Connected >")
 
     recv_fn = build_recv_func(sock, use_native_timestamps=False)
@@ -68,6 +70,73 @@ def client(*, host_ip: str, port: int) -> None:
         payload = [f"{i:02x}" for i in next_msg.data]
         payload_str = " ".join(payload)
         click.echo(f"{next_msg.arbitration_id:08x}: {payload_str}")
+
+
+@daemon.command()
+@click.option("-ip", "--host-ip", default="localhost", type=str)
+@click.option("-p", "--port", default=8000, type=int)
+@click.option("-c", "--channel", default="vcan0", type=str)
+def candump(*, host_ip: str, port: int, channel: str) -> None:
+    """
+    Connects the daemon and dumps received CAN messages, candump-style.
+    """
+    logging.basicConfig(level=logging.INFO)
+    sock = connect_socketcan_client(host=host_ip, port=port, channel=channel)
+    click.echo("> Connected >")
+
+    recv_fn = build_recv_func(sock, use_native_timestamps=False)
+    while True:
+        next_msg = recv_fn()
+        id_width = 8 if next_msg.is_extended_id else 3
+        payload = " ".join(f"{byte:02X}" for byte in next_msg.data)
+        click.echo(
+            f"({next_msg.timestamp:.6f})  {channel}  "
+            f"{next_msg.arbitration_id:0{id_width}X}   [{len(next_msg.data)}]  {payload}",
+        )
+
+
+def _frame_bit_count(*, is_extended_id: bool, data_len: int) -> int:
+    """
+    Approximates the on-wire bit count of a classic CAN frame (excludes bit stuffing).
+    """
+    overhead = 67 if is_extended_id else 47
+    return overhead + 8 * data_len
+
+
+@daemon.command()
+@click.option("-ip", "--host-ip", default="localhost", type=str)
+@click.option("-p", "--port", default=8000, type=int)
+@click.option("-c", "--channel", default="vcan0", type=str)
+@click.option("-b", "--bitrate", type=int, default=500_000)
+@click.option("-w", "--window", type=float, default=1.0, help="Averaging window, in seconds")
+def busload(*, host_ip: str, port: int, channel: str, bitrate: int, window: float) -> None:
+    """
+    Connects the daemon and periodically displays the CAN bus load.
+    """
+    logging.basicConfig(level=logging.INFO)
+    sock = connect_socketcan_client(host=host_ip, port=port, channel=channel)
+    click.echo("> Connected >")
+
+    recv_fn = build_recv_func(sock, use_native_timestamps=False)
+    window_bits = 0
+    window_msg_count = 0
+    window_start = monotonic()
+    while True:
+        next_msg = recv_fn()
+        window_bits += _frame_bit_count(
+            is_extended_id=next_msg.is_extended_id,
+            data_len=len(next_msg.data),
+        )
+        window_msg_count += 1
+
+        elapsed = monotonic() - window_start
+        if elapsed >= window:
+            load_pct = 100.0 * window_bits / (bitrate * elapsed)
+            msg_per_sec = window_msg_count / elapsed
+            click.echo(f"Bus load: {load_pct:5.1f}%  |  {msg_per_sec:7.1f} msg/s")
+            window_bits = 0
+            window_msg_count = 0
+            window_start = monotonic()
 
 
 @daemon.command()
