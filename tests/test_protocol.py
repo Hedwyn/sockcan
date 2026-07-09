@@ -16,7 +16,14 @@ from hypothesis import HealthCheck, given, settings
 
 from sockcan import SocketcanConfig, SocketcanFd, build_recv_func, connect_to_socketcan
 from sockcan._protocol import build_send_func
-from sockcan.fixtures import can_messages, rx_can_bus, skip_if_no_vcan, tx_can_bus, vcan_bus
+from sockcan.fixtures import (
+    can_messages,
+    rx_can_bus,
+    skip_if_no_vcan,
+    skip_if_windows,
+    tx_can_bus,
+    vcan_bus,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -77,6 +84,7 @@ def tx_sock(request: FixtureRequest) -> Generator[SocketcanFd, None, None]:
 
 @pytest.mark.parametrize("rx_sock", ["sockcan"], indirect=True)
 @skip_if_no_vcan()
+@skip_if_windows()
 def test_sock_sanity(rx_sock: Socket) -> None:
     assert isinstance(rx_sock, socket.socket)
 
@@ -85,6 +93,7 @@ def test_sock_sanity(rx_sock: Socket) -> None:
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
 @pytest.mark.parametrize("rx_sock", SOCKET_PROVIDERS, indirect=True)
 @skip_if_no_vcan()
+@skip_if_windows()
 def test_recv_message(
     can_message: PyCanMessage,
     tx_can_bus: SocketcanBus,
@@ -106,6 +115,7 @@ def test_recv_message(
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
 @pytest.mark.parametrize("tx_sock", SOCKET_PROVIDERS, indirect=True)
 @skip_if_no_vcan()
+@skip_if_windows()
 def test_send_message(
     can_message: PyCanMessage,
     rx_can_bus: SocketcanBus,

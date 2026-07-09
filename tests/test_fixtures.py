@@ -11,7 +11,14 @@ from typing import TYPE_CHECKING
 
 from hypothesis import HealthCheck, given, settings
 
-from sockcan.fixtures import SocketcanBus, can_messages, rx_can_bus, skip_if_no_vcan, tx_can_bus
+from sockcan.fixtures import (
+    SocketcanBus,
+    can_messages,
+    rx_can_bus,
+    skip_if_no_vcan,
+    skip_if_windows,
+    tx_can_bus,
+)
 
 if TYPE_CHECKING:
     from can import Message
@@ -25,6 +32,7 @@ _ = tx_can_bus
 @given(can_message=can_messages())
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture])
 @skip_if_no_vcan()
+@skip_if_windows()
 def test_random_message_sanity(
     can_message: Message,
     rx_can_bus: SocketcanBus,

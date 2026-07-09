@@ -25,7 +25,14 @@ from sockcan.daemon import (
     SocketcanServer,
     connect_socketcan_client,
 )
-from sockcan.fixtures import can_messages, rx_can_bus, skip_if_no_vcan, tx_can_bus, vcan_bus
+from sockcan.fixtures import (
+    can_messages,
+    rx_can_bus,
+    skip_if_no_vcan,
+    skip_if_windows,
+    tx_can_bus,
+    vcan_bus,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -105,6 +112,7 @@ def virtual_socketcan_server() -> Generator[SocketcanServer, None, None]:
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=10)
 @parametrize_stream_modes
 @skip_if_no_vcan()
+@skip_if_windows()
 def test_single_consumer_rx(
     can_messages: list[PyCanMessage],
     tx_can_bus: SocketcanBus,
@@ -127,6 +135,7 @@ def test_single_consumer_rx(
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=10)
 @parametrize_stream_modes
 @skip_if_no_vcan()
+@skip_if_windows()
 def test_single_consumer_tx(
     can_messages: list[PyCanMessage],
     rx_can_bus: SocketcanBus,
@@ -151,6 +160,7 @@ def test_single_consumer_tx(
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=1)
 @parametrize_stream_modes
 @skip_if_no_vcan()
+@skip_if_windows()
 def test_socketcan_bus_bidir(
     can_messages: list[PyCanMessage],
     *,
@@ -195,6 +205,7 @@ def test_socketcan_bus_bidir(
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=1)
 @parametrize_stream_modes
 @skip_if_no_vcan()
+@skip_if_windows()
 def test_socketcan_bus_buffering(
     can_messages: list[PyCanMessage],
     *,
@@ -284,6 +295,7 @@ def test_virtual_socketcan_bus(
 )
 @pytest.mark.parametrize("virtual", [False, True])
 @skip_if_no_vcan()
+@skip_if_windows()
 def test_socketcan_bus_daemon(
     can_messages: list[PyCanMessage],
     *,
@@ -315,6 +327,7 @@ def test_socketcan_bus_daemon(
 
 @pytest.mark.parametrize("use_stream", [False, True])
 @skip_if_no_vcan()
+@skip_if_windows()
 def test_socketcan_server_with_filters(
     tx_can_bus: SocketcanBus,
     *,

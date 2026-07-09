@@ -18,6 +18,7 @@ from sockcan.fixtures import (
     can_messages,
     rx_can_bus,
     skip_if_no_vcan,
+    skip_if_windows,
     tx_can_bus,
 )
 from sockcan.interop import FastSocketcanBus, override_python_can
@@ -31,6 +32,7 @@ _ = rx_can_bus
 
 
 @skip_if_no_vcan()
+@skip_if_windows()
 def test_python_can_overriding() -> None:
     with override_python_can(), can.Bus(channel="vcan0", interface="socketcan") as bus:
         assert isinstance(bus, FastSocketcanBus)
@@ -41,6 +43,7 @@ def test_python_can_overriding() -> None:
 @given(can_messages=st.lists(can_messages(), min_size=10, max_size=100))
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=10)
 @skip_if_no_vcan()
+@skip_if_windows()
 def test_compatiblity_rx(
     can_messages: list[PyCanMessage],
     tx_can_bus: SocketcanBus,
@@ -63,6 +66,7 @@ def test_compatiblity_rx(
 @given(can_messages=st.lists(can_messages(), min_size=10, max_size=100))
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=10)
 @skip_if_no_vcan()
+@skip_if_windows()
 def test_compatiblity_tx(
     can_messages: list[PyCanMessage],
     tx_can_bus: SocketcanBus,
