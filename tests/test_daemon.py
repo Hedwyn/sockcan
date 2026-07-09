@@ -257,7 +257,7 @@ def test_virtual_socketcan_bus(
     with get_socketcan_server(virtual=True, use_stream=use_stream) as virtual_socketcan_server:
         conn_1 = virtual_socketcan_server.subscribe()
         virtual_socketcan_server.start()
-        recv_fn_1 = build_recv_func(conn_1, use_native_timestamps=False)
+        recv_fn_1 = build_recv_func(conn_1, use_native_timestamps=False, is_stream=use_stream)
         send_fn_1 = build_send_func(conn_1, expects_msg_cls=True)
 
         test_msg = can_messages[0]
@@ -271,7 +271,7 @@ def test_virtual_socketcan_bus(
         conn_2 = virtual_socketcan_server.subscribe()
         # conn_2.setblocking(False)
         send_fn_2 = build_send_func(conn_2, expects_msg_cls=True)
-        recv_fn_2 = build_recv_func(conn_2, use_native_timestamps=False)
+        recv_fn_2 = build_recv_func(conn_2, use_native_timestamps=False, is_stream=use_stream)
 
         for msg in can_messages:
             send_fn_1(msg)
