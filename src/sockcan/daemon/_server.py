@@ -338,7 +338,7 @@ class SocketcanServer:
             if self._bus is not None and self._bus.state == BusState.ERROR:
                 _logger.error("CAN bus server ended on can operation error: %s", exc)  # noqa: TRY400
 
-    def _run_rx(self) -> None:  # noqa: PLR0912
+    def _run_rx(self) -> None:
         """
         Listens forever to the bus and forwards messages to all consumers.
         """
@@ -658,6 +658,7 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
         self._httpd.shutdown()
         if self._httpd_thread is not None:
             self._httpd_thread.join()
+        self._httpd.server_close()
         for channel, server in self._servers.items():
             _logger.info("Stopping socketcanserver on channel %s", channel)
             server.stop()
