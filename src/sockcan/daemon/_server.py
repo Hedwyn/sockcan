@@ -19,6 +19,7 @@ import os
 import platform
 import socket
 import struct
+import time
 import warnings
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
@@ -200,6 +201,7 @@ class SocketcanServer:
         *,
         use_native_timestamps: bool = False,
         use_stream: bool = False,
+        contention_time: float | None = None,
     ) -> None:
         """
         Wraps the passed `bus`. For interfaces that do not support concurrency
@@ -207,6 +209,9 @@ class SocketcanServer:
 
         If `use_stream`  is enabled, uses `SOCK_STREAM` instead of `SOCK_DGRAM`
         when creating sockets.
+
+        If `contention_time` is passed, the configured delay (in seconds)
+        will be applied between messages.
         """
         self._consumers: list[_Consumer] = []
         self._kill_switch = Event
@@ -218,6 +223,7 @@ class SocketcanServer:
         self.use_native_timestamps = use_native_timestamps
         self._selector.register(self._kill_switch_rx, events=EVENT_READ, data=None)
         self._use_stream = use_stream
+        self.contention_time = contention_time
 
     @property
     def bus(self) -> BusABC | None:
@@ -429,9 +435,11 @@ class SocketcanServer:
         """
         selector = self._selector
         bus_send = self._bus.send if self._bus else None
+        contention_time = self.contention_time
         kill_switch = self._kill_switch_rx
         consumers = self._consumers
         is_stream = self._use_stream
+        sleep = time.sleep
         while self._running:
             selector_events = selector.select()
             for key, _ in selector_events:
@@ -494,6 +502,8 @@ class SocketcanServer:
                         is_extended_id=msg.is_extended_id,
                         data=msg.data,
                     )
+                    if contention_time:
+                        sleep(contention_time)
                     bus_send(py_can_msg)
         _logger.info("Stopping sender thread, we've got terminated")
 
@@ -604,10 +614,13 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
     Use /subscribe endpoint (with channel?=channel_name) to get a socket.
     """
 
-    def __init__(self, host: str = "localhost", port: int = 8000) -> None:
+    def __init__(
+        self, host: str = "localhost", port: int = 8000, contention_time: float | None = None
+    ) -> None:
         self._port = port
         self._host = host
         self._httpd = ThreadedHTTPServer((host, port), partial(_RequestHandler, daemon=self))
+        self.contention_time = contention_time
 
         self._httpd_thread: Thread | None = None
         self._servers: dict[str, SocketcanServer] = {}
@@ -618,7 +631,7 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
         Communications within the bus are simulated and will only be seen by the consumers
         of that bus.
         """
-        virtual_server = SocketcanServer(use_stream=True)
+        virtual_server = SocketcanServer(use_stream=True, contention_time=self.contention_time)
         self._servers[channel] = virtual_server
         if self.is_running:
             virtual_server.start()
@@ -635,7 +648,12 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
         Registers the parameters for a new bus that should be managed by this daemon.
         """
         bus = can.Bus(interface=interface, channel=channel, bitrate=bitrate)
-        server = SocketcanServer(bus, use_native_timestamps=use_native_timestamps, use_stream=True)
+        server = SocketcanServer(
+            bus,
+            use_native_timestamps=use_native_timestamps,
+            use_stream=True,
+            contention_time=self.contention_time,
+        )
         self._servers[channel] = server
 
     def start_socketcan_servers(self) -> None:

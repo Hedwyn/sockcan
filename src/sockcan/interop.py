@@ -134,6 +134,7 @@ class SocketcanDaemonConfig:
     local_daemon: SocketcanDaemon | None = None
     linux_too: bool = False
     use_native_timestamps: bool = False
+    min_contention_time: float | None = None
 
 
 # --- Globals- required to inject this implementation into python-can --- #
@@ -345,7 +346,11 @@ def activate_userspace_socketcan(
                     "If you want to run daemon locally, enabel `allow_run_daemon_locally`",
                 )
 
-            daemon = SocketcanDaemon(config.host, config.port)
+            daemon = SocketcanDaemon(
+                config.host,
+                config.port,
+                contention_time=config.min_contention_time,
+            )
             for params in parameters:
                 daemon.register_bus(
                     channel=params.channel,
