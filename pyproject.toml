@@ -46,6 +46,7 @@ packages = ["src/sockcan"]
 
 [tool.hatch.build.hooks.smelt]
 packages_location = { "sockcan" = "src/sockcan" }
+platforms = ["linux"]
 mypyc_modules = [
   { import_path = "sockcan._protocol" },
   { import_path = "sockcan.transcoders._common" },
