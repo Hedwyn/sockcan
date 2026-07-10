@@ -234,18 +234,19 @@ class UserspaceSocketcanBus:
             return target_server.subscribe(filters=list(filters) if filters else None)
 
         # daemon mode
-        if not ping_daemon(_global_config.host, _global_config.port):
+        try:
+            return connect_socketcan_client(
+                _global_config.host,
+                _global_config.port,
+                channel,
+                filters=list(filters) if filters else None,
+            )
+        except ConnectionRefusedError as e:
             raise RuntimeError(
                 "Daemon mode is used, but no daemon is running."
                 "If you were intending to run daemon locally, "
                 "use `ensure_socketcan_daemon_running()`",
-            )
-        return connect_socketcan_client(
-            _global_config.host,
-            _global_config.port,
-            channel,
-            filters=list(filters) if filters else None,
-        )
+            ) from e
 
     def __enter__(self) -> Self:
         """
