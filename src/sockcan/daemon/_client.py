@@ -25,7 +25,7 @@ HTTP_DELIMITER = "\r\n"
 
 
 def ping_daemon(
-    host: str = "localhost",
+    host: str = "127.0.0.1",
     port: int = 8000,
 ) -> bool:
     """
@@ -55,7 +55,7 @@ def ping_daemon(
 
 
 def connect_socketcan_client(
-    host: str = "localhost",
+    host: str = "127.0.0.1",
     port: int = 8000,
     channel: str = "PCAN_USBBUS1",
     filters: list[CanFilter] | None = None,
