@@ -171,6 +171,7 @@ class BusParameters:
     channel: str = "PCAN_USBBUS1"
     interface: str = "pcan"
     bitrate: int = 500_000
+    virtual: bool = False
 
 
 type RecvFn = Callable[[], Message]

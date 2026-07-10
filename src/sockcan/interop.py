@@ -353,12 +353,15 @@ def activate_userspace_socketcan(
                 contention_time=config.min_contention_time,
             )
             for params in parameters:
-                daemon.register_bus(
-                    channel=params.channel,
-                    interface=params.interface,
-                    bitrate=params.bitrate,
-                    use_native_timestamps=config.use_native_timestamps,
-                )
+                if params.virtual:
+                    daemon.register_virtual_bus(params.channel)
+                else:
+                    daemon.register_bus(
+                        channel=params.channel,
+                        interface=params.interface,
+                        bitrate=params.bitrate,
+                        use_native_timestamps=config.use_native_timestamps,
+                    )
             daemon.start()
             atexit.register(daemon.stop)
     _hijack_python_can(UserspaceSocketcanBus)
