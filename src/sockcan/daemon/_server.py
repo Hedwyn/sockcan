@@ -267,6 +267,7 @@ class SocketcanServer:
             use_native_timestamps=self.use_native_timestamps,
             is_stream=use_stream,
         )
+        _logger.info("Registering new consumer with filters: %s", normalized_filters)
         self._consumers.append(_Consumer(send_fn, fd, normalized_filters))
         # KeyError is expected if Socket is already registered (e.g., HTTP upgrade socket)
         # This is fine, we'll handle it in the HTTP handler thread
@@ -283,6 +284,7 @@ class SocketcanServer:
         If filters is passed, only messages with requested filters will be forwarded.
         Accepts either set[int] for exact matching or list[CanFilter] for mask-based filtering.
         """
+        _logger.info("Subscribing with filters: %s", filters)
         # Windows sanity checks:
         # Modern windows *do* have AF_UNIX socket types.
         # However, 1) this not true for older versions and 2)
@@ -348,6 +350,7 @@ class SocketcanServer:
         """
         if not self._running:
             return
+        _logger.info("Stopping socketcanserver on %s", self._bus)
         self._kill_switch_tx.send(b"0")
         self._running = False
 
@@ -531,6 +534,10 @@ class _RequestHandler(BaseHTTPRequestHandler):
         self.kill_switch = Event()
         super().__init__(request, client_address, server)
 
+    def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+        statement = "%s - - " + format
+        _logger.info(statement, self.client_address[0], *args)
+
     def do_GET(self) -> None:
         """
         Handler for GET requests.
@@ -632,6 +639,7 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
         Communications within the bus are simulated and will only be seen by the consumers
         of that bus.
         """
+        _logger.info("Registering virtual bus on channel %s", channel)
         virtual_server = SocketcanServer(use_stream=True, contention_time=self.contention_time)
         self._servers[channel] = virtual_server
         if self.is_running:
@@ -648,6 +656,12 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
         """
         Registers the parameters for a new bus that should be managed by this daemon.
         """
+        _logger.info(
+            "Registering bus on channel %s (interface=%s, bitrate=%d)",
+            channel,
+            interface,
+            bitrate,
+        )
         bus = can.Bus(interface=interface, channel=channel, bitrate=bitrate)
         server = SocketcanServer(
             bus,
