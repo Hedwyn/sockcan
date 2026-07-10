@@ -27,16 +27,19 @@ HTTP_DELIMITER = "\r\n"
 def ping_daemon(
     host: str = "127.0.0.1",
     port: int = 8000,
+    timeout: float = 0.1,
 ) -> bool:
     """
     Tries pinging the daemon and return whether it's currently running.
     """
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(timeout)
     try:
         sock.connect((host, port))
-    except ConnectionRefusedError:
+    except (ConnectionRefusedError, TimeoutError):
         _logger.info("No service running at %s:%d", host, port)
         return False
+    sock.settimeout(None)
 
     ping_request = (
         HTTP_DELIMITER.join(
