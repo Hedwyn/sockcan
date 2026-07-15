@@ -623,11 +623,12 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
     """
 
     def __init__(
-        self, host: str = "localhost", port: int = 8000, contention_time: float | None = None
+        self, host: str = "localhost", port: int = 0, contention_time: float | None = None
     ) -> None:
-        self._port = port
         self._host = host
         self._httpd = ThreadedHTTPServer((host, port), partial(_RequestHandler, daemon=self))
+        self._port = self._httpd.socket.getsockname()[1]
+        _logger.info("Socketcan daemon bound to %s:%d", host, self._port)
         self.contention_time = contention_time
 
         self._httpd_thread: Thread | None = None
@@ -741,7 +742,7 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
 
 
 @cache
-def start_daemon_globally(host: str = "localhost", port: int = 8000) -> SocketcanDaemon:
+def start_daemon_globally(host: str = "localhost", port: int = 0) -> SocketcanDaemon:
     daemon = SocketcanDaemon(host=host, port=port)
     daemon.start()
     atexit.register(daemon.stop)
@@ -750,9 +751,9 @@ def start_daemon_globally(host: str = "localhost", port: int = 8000) -> Socketca
 
 def ensure_socketcan_daemon_running(
     host: str = "localhost",
-    port: int = 8000,
+    port: int = 0,
 ) -> SocketcanDaemon | None:
-    if ping_daemon(host, port):
+    if port and ping_daemon(host, port):
         _logger.info("Daemon is already run by another process, no need to start it here")
         return None
-    return start_daemon_globally()
+    return start_daemon_globally(host, port)
