@@ -64,7 +64,7 @@ def client(*, host_ip: str, port: int, channel: str) -> None:
     sock = connect_socketcan_client(host=host_ip, port=port, channel=channel)
     click.echo("> Connected >")
 
-    recv_fn = build_recv_func(sock, use_native_timestamps=False)
+    recv_fn = build_recv_func(sock, use_native_timestamps=False, is_stream=True)
     while True:
         next_msg = recv_fn()
         payload = [f"{i:02x}" for i in next_msg.data]
@@ -84,7 +84,7 @@ def candump(*, host_ip: str, port: int, channel: str) -> None:
     sock = connect_socketcan_client(host=host_ip, port=port, channel=channel)
     click.echo("> Connected >")
 
-    recv_fn = build_recv_func(sock, use_native_timestamps=False)
+    recv_fn = build_recv_func(sock, use_native_timestamps=False, is_stream=True)
     while True:
         next_msg = recv_fn()
         id_width = 8 if next_msg.is_extended_id else 3
@@ -117,7 +117,7 @@ def busload(*, host_ip: str, port: int, channel: str, bitrate: int, window: floa
     sock = connect_socketcan_client(host=host_ip, port=port, channel=channel)
     click.echo("> Connected >")
 
-    recv_fn = build_recv_func(sock, use_native_timestamps=False)
+    recv_fn = build_recv_func(sock, use_native_timestamps=False, is_stream=True)
     window_bits = 0
     window_msg_count = 0
     window_start = monotonic()
