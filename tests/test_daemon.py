@@ -27,6 +27,7 @@ from sockcan.daemon import (
 )
 from sockcan.fixtures import (
     can_messages,
+    is_windows,
     rx_can_bus,
     skip_if_no_vcan,
     skip_if_windows,
@@ -248,7 +249,16 @@ def test_socketcan_bus_buffering(
 
 @given(can_messages=st.lists(can_messages(), min_size=10, max_size=100))
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=1)
-@parametrize_stream_modes
+@pytest.mark.parametrize(
+    "use_stream",
+    [
+        pytest.param(
+            False,
+            marks=pytest.mark.skipif(is_windows(), reason="recvmsg not available on Windows"),
+        ),
+        True,
+    ],
+)
 def test_virtual_socketcan_bus(
     can_messages: list[PyCanMessage],
     *,
