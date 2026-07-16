@@ -304,7 +304,8 @@ class SocketcanServer:
             _ours, _theirs = _inet_socket_pair()
             force_stream = True
         else:
-            _ours, _theirs = socket.socketpair(socket.AF_UNIX, socket.SOCK_DGRAM)
+            # note: using getattr here to not trip mypyc on unknown attribute
+            _ours, _theirs = socket.socketpair(getattr(socket, "AF_UNIX"), socket.SOCK_DGRAM)  # noqa: B009
         ours = cast("SocketcanFd", _ours)
         theirs = cast("SocketcanFd", _theirs)
         self.listen_to(ours, filters=filters, force_stream=force_stream)
