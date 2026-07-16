@@ -1,6 +1,6 @@
 [build-system]
 # Note: cantools only there because mypyc needs the type stubs at install-time
-requires = ["hatchling", "hatch-vcs", "smelt[build]==0.5.0", "cantools"]
+requires = ["hatchling", "hatch-vcs", "smelt[build]==0.6.1", "cantools"]
 build-backend = "hatchling.build"
 
 [project]
@@ -14,7 +14,7 @@ authors = [{ name = "Baptiste Pestourie" }]
 dependencies = []
 
 [project.optional-dependencies]
-transcoders = ["python-can"]
+transcoders = ["cantools"]
 daemon = ["click", "python-can"]
 test = ["hypothesis", "pytest", "python-can", "cantools"]
 docs = ["mkdocs", "mkdocs-material"]
@@ -48,10 +48,22 @@ packages = ["src/sockcan"]
 packages_location = { "sockcan" = "src/sockcan" }
 platforms = ["linux"]
 mypyc_modules = [
-  { import_path = "sockcan._protocol" },
-  { import_path = "sockcan.transcoders._common" },
-  { import_path = "sockcan.transcoders._decoders" },
-  { import_path = "sockcan.transcoders._encoders" },
-  { import_path = "sockcan.daemon._server" },
-  { import_path = "sockcan.daemon._client" },
+  { import_path = "sockcan._protocol", extras = [
+    "transcoders",
+  ] },
+  { import_path = "sockcan.transcoders._common", extras = [
+    "transcoders",
+  ] },
+  { import_path = "sockcan.transcoders._decoders", extras = [
+    "transcoders",
+  ] },
+  { import_path = "sockcan.transcoders._encoders", extras = [
+    "transcoders",
+  ] },
+  { import_path = "sockcan.daemon._server", extras = [
+    "daemon",
+  ] },
+  { import_path = "sockcan.daemon._client", extras = [
+    "daemon",
+  ] },
 ]
