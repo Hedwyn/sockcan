@@ -627,6 +627,8 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
         self, host: str = "localhost", port: int = 0, contention_time: float | None = None
     ) -> None:
         self._host = host
+        if port == 0 and (env_port := os.environ.get("SOCKCAN_DAEMON_PORT")):
+            port = int(env_port)
         self._httpd = ThreadedHTTPServer((host, port), partial(_RequestHandler, daemon=self))
         self._port = self._httpd.socket.getsockname()[1]
         _logger.info("Socketcan daemon bound to %s:%d", host, self._port)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+import os
 import platform
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -336,6 +337,8 @@ def activate_userspace_socketcan(
             _local_servers[channel] = server
 
     elif config.mode == "daemon":
+        if config.port == 0 and (env_port := os.environ.get("SOCKCAN_DAEMON_PORT")):
+            config.port = int(env_port)
         if config.port and ping_daemon(config.host, config.port):
             _logger.info(
                 "Daemon is already up and run by another process, using the detected instance",
