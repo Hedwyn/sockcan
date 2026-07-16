@@ -129,7 +129,7 @@ class SocketcanDaemonConfig:
     mode: ServerMode = "local"
     allow_run_daemon_locally: bool = True
     host: str = "localhost"
-    port: int = 8000
+    port: int = 0
     local_server: SocketcanServer | None = None
     local_daemon: SocketcanDaemon | None = None
     linux_too: bool = False
@@ -336,7 +336,7 @@ def activate_userspace_socketcan(
             _local_servers[channel] = server
 
     elif config.mode == "daemon":
-        if ping_daemon(config.host, config.port):
+        if config.port and ping_daemon(config.host, config.port):
             _logger.info(
                 "Daemon is already up and run by another process, using the detected instance",
             )
@@ -352,6 +352,7 @@ def activate_userspace_socketcan(
                 config.port,
                 contention_time=config.min_contention_time,
             )
+            config.port = daemon.port
             for params in parameters:
                 if params.virtual:
                     daemon.register_virtual_bus(params.channel)
