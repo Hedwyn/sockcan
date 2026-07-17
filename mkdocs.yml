@@ -1,5 +1,11 @@
 site_name: Sockcan
 
+validation:
+  nav:
+    # index.md#anchor entries below are valid links (verified against the built site) but mkdocs'
+    # nav validator doesn't resolve in-page anchors against known pages, so it always flags them.
+    not_found: info
+
 markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
@@ -10,16 +16,23 @@ markdown_extensions:
   - pymdownx.superfences
 
 nav:
-  - Home: index.md
-  - Explanation:
-      - "Overview": explanation/overview.md
-      - "What is Sockcan?": explanation/index.md
-      - "Core Concepts": explanation/core_concepts.md
-  - How-to Guides:
-      - "Basic Usage": how-to-guides/basic_usage.md
+  - Home:
+      - Overview: index.md
+      - "Core API": index.md#using-the-core-api-directly
+      - "python-can Interop": index.md#trying-out-sockcan-in-existing-python-can-code
+      - "Daemon": index.md#standalone-commands-for-the-daemon
+      - "What is Sockcan?": index.md#what-is-sockcan
   - Tutorials:
-      - "Getting Started": tutorials/getting_started.md
-      - "Virtual CAN on Windows": tutorials/virtual_can.md
-      - "Windows Setup": tutorials/windows_setup.md
+      - "Setting up CAN": tutorials/setting_up_can.md
+      - "Core Usage": tutorials/core_usage.md
+      - "Daemon": tutorials/daemon.md
+      - "python-can Interop": tutorials/interop.md
+      - "Transcoders": tutorials/transcoders.md
+  - Internals:
+      - "Core Concepts": internals/core_concepts.md
+      - "Performance & Native Code": internals/performance.md
+  - Reference:
+      - "API Reference": reference/api.md
+      - "Error Codes": reference/error_codes.md
 
 theme: material
