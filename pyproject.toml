@@ -48,22 +48,10 @@ packages = ["src/sockcan"]
 packages_location = { "sockcan" = "src/sockcan" }
 platforms = ["linux", "windows"]
 mypyc_modules = [
-  { import_path = "sockcan._protocol", extras = [
-    "transcoders",
-  ] },
-  { import_path = "sockcan.transcoders._common", extras = [
-    "transcoders",
-  ] },
-  { import_path = "sockcan.transcoders._decoders", extras = [
-    "transcoders",
-  ] },
-  { import_path = "sockcan.transcoders._encoders", extras = [
-    "transcoders",
-  ] },
-  { import_path = "sockcan.daemon._server", extras = [
-    "daemon",
-  ] },
-  { import_path = "sockcan.daemon._client", extras = [
-    "daemon",
-  ] },
+  { import_path = "sockcan._protocol" },
+  { import_path = "sockcan.transcoders._common" },
+  { import_path = "sockcan.transcoders._decoders" },
+  { import_path = "sockcan.transcoders._encoders" },
+  { import_path = "sockcan.daemon._server" },
+  { import_path = "sockcan.daemon._client" },
 ]
