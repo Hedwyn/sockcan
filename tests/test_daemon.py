@@ -52,6 +52,7 @@ type SocketProvider = Literal["python-can", "sockcan"]
 
 
 parametrize_stream_modes = pytest.mark.parametrize("use_stream", [False, True])
+parametrize_contention_time = pytest.mark.parametrize("contention_time", [None, 0.001])
 
 
 @contextmanager
@@ -60,10 +61,11 @@ def get_socketcan_server(
     virtual: bool = False,
     use_stream: bool = False,
     start: bool = False,
+    contention_time: float | None = None,
 ) -> Generator[SocketcanServer, None, None]:
     context = contextlib.nullcontext if virtual else vcan_bus
     with context() as bus:
-        server = SocketcanServer(bus, use_stream=use_stream)
+        server = SocketcanServer(bus, use_stream=use_stream, contention_time=contention_time)
         if start:
             server.start()
         try:
@@ -76,12 +78,13 @@ def get_socketcan_server(
 def get_socketcan_daemon(
     *,
     virtual: bool = False,
+    contention_time: float | None = None,
 ) -> Generator[SocketcanDaemon, None, None]:
     # note: have to seed manually because seed is reset to constant
     # value at each test, thus the picked value is always the same
     random.seed(time.time_ns())
     port = random.randint(7000, 8000)  # noqa: S311
-    daemon = SocketcanDaemon(port=port)
+    daemon = SocketcanDaemon(port=port, contention_time=contention_time)
     if virtual:
         daemon.register_virtual_bus("vcan0")
     else:
@@ -112,6 +115,7 @@ def virtual_socketcan_server() -> Generator[SocketcanServer, None, None]:
 @given(can_messages=st.lists(can_messages(), min_size=10, max_size=100))
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=10)
 @parametrize_stream_modes
+@parametrize_contention_time
 @skip_if_no_vcan()
 @skip_if_windows()
 def test_single_consumer_rx(
@@ -119,8 +123,11 @@ def test_single_consumer_rx(
     tx_can_bus: SocketcanBus,
     *,
     use_stream: bool,
+    contention_time: float | None,
 ) -> None:
-    with get_socketcan_server(use_stream=use_stream) as socketcan_server:
+    with get_socketcan_server(
+        use_stream=use_stream, contention_time=contention_time
+    ) as socketcan_server:
         consumer = socketcan_server.subscribe()
         socketcan_server.start(direction=ServerDirection.RX_ONLY)
         recv_fn = build_recv_func(consumer, use_native_timestamps=False, is_stream=True)
@@ -135,6 +142,7 @@ def test_single_consumer_rx(
 @given(can_messages=st.lists(can_messages(), min_size=10, max_size=100))
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=10)
 @parametrize_stream_modes
+@parametrize_contention_time
 @skip_if_no_vcan()
 @skip_if_windows()
 def test_single_consumer_tx(
@@ -142,8 +150,11 @@ def test_single_consumer_tx(
     rx_can_bus: SocketcanBus,
     *,
     use_stream: bool,
+    contention_time: float | None,
 ) -> None:
-    with get_socketcan_server(use_stream=use_stream) as socketcan_server:
+    with get_socketcan_server(
+        use_stream=use_stream, contention_time=contention_time
+    ) as socketcan_server:
         consumer = socketcan_server.subscribe()
         socketcan_server.start(direction=ServerDirection.TX_ONLY)
         send_fn = build_send_func(consumer)
@@ -160,14 +171,18 @@ def test_single_consumer_tx(
 @given(can_messages=st.lists(can_messages(), min_size=10, max_size=100))
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=1)
 @parametrize_stream_modes
+@parametrize_contention_time
 @skip_if_no_vcan()
 @skip_if_windows()
 def test_socketcan_bus_bidir(
     can_messages: list[PyCanMessage],
     *,
     use_stream: bool,
+    contention_time: float | None,
 ) -> None:
-    with get_socketcan_server(use_stream=use_stream) as socketcan_server:
+    with get_socketcan_server(
+        use_stream=use_stream, contention_time=contention_time
+    ) as socketcan_server:
         conn_1 = socketcan_server.subscribe()
         socketcan_server.start()
 
@@ -205,14 +220,18 @@ def test_socketcan_bus_bidir(
 @given(can_messages=st.lists(can_messages(), min_size=2, max_size=2))
 @settings(suppress_health_check=[HealthCheck.function_scoped_fixture], max_examples=1)
 @parametrize_stream_modes
+@parametrize_contention_time
 @skip_if_no_vcan()
 @skip_if_windows()
 def test_socketcan_bus_buffering(
     can_messages: list[PyCanMessage],
     *,
     use_stream: bool,
+    contention_time: float | None,
 ) -> None:
-    with get_socketcan_server(use_stream=use_stream) as socketcan_server:
+    with get_socketcan_server(
+        use_stream=use_stream, contention_time=contention_time
+    ) as socketcan_server:
         conn_1 = socketcan_server.subscribe()
         socketcan_server.start()
         recv_fn_1 = build_recv_func(conn_1, use_native_timestamps=False)
@@ -259,12 +278,16 @@ def test_socketcan_bus_buffering(
         True,
     ],
 )
+@parametrize_contention_time
 def test_virtual_socketcan_bus(
     can_messages: list[PyCanMessage],
     *,
     use_stream: bool,
+    contention_time: float | None,
 ) -> None:
-    with get_socketcan_server(virtual=True, use_stream=use_stream) as virtual_socketcan_server:
+    with get_socketcan_server(
+        virtual=True, use_stream=use_stream, contention_time=contention_time
+    ) as virtual_socketcan_server:
         conn_1 = virtual_socketcan_server.subscribe()
         virtual_socketcan_server.start()
         recv_fn_1 = build_recv_func(conn_1, use_native_timestamps=False, is_stream=use_stream)
@@ -304,14 +327,16 @@ def test_virtual_socketcan_bus(
     deadline=1000,
 )
 @pytest.mark.parametrize("virtual", [False, True])
+@parametrize_contention_time
 @skip_if_no_vcan()
 @skip_if_windows()
 def test_socketcan_bus_daemon(
     can_messages: list[PyCanMessage],
     *,
     virtual: bool,
+    contention_time: float | None,
 ) -> None:
-    with get_socketcan_daemon(virtual=virtual) as daemon:
+    with get_socketcan_daemon(virtual=virtual, contention_time=contention_time) as daemon:
         conn_1 = connect_socketcan_client(channel="vcan0", port=daemon.port)
 
         recv_fn_1 = build_recv_func(conn_1, use_native_timestamps=False)
@@ -336,16 +361,20 @@ def test_socketcan_bus_daemon(
 
 
 @pytest.mark.parametrize("use_stream", [False, True])
+@parametrize_contention_time
 @skip_if_no_vcan()
 @skip_if_windows()
 def test_socketcan_server_with_filters(
     tx_can_bus: SocketcanBus,
     *,
     use_stream: bool,
+    contention_time: float | None,
 ) -> None:
     from can import Message
 
-    with get_socketcan_server(use_stream=use_stream) as socketcan_server:
+    with get_socketcan_server(
+        use_stream=use_stream, contention_time=contention_time
+    ) as socketcan_server:
         # Client 1: subscribes with filter for specific IDs
         conn_1 = socketcan_server.subscribe(filters={0x100, 0x200})
         socketcan_server.start(direction=ServerDirection.RX_ONLY)
