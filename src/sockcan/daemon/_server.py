@@ -445,6 +445,9 @@ class SocketcanServer:
         consumers = self._consumers
         is_stream = self._use_stream
         sleep = time.sleep
+        monotonic_time_ns = time.monotonic_ns
+        contention_time_ns = None if contention_time is None else round(contention_time * 1e9)
+        last_sent: float = 0.0
         while self._running:
             selector_events = selector.select()
             for key, _ in selector_events:
@@ -507,9 +510,14 @@ class SocketcanServer:
                         is_extended_id=msg.is_extended_id,
                         data=msg.data,
                     )
-                    if contention_time:
-                        sleep(contention_time)
-                    bus_send(py_can_msg)
+                    if contention_time_ns:
+                        contention = last_sent + contention_time_ns - monotonic_time_ns()
+                        if contention > 0:
+                            sleep(contention / 1e9)
+                        bus_send(py_can_msg)
+                        last_sent = monotonic_time_ns()
+                    else:
+                        bus_send(py_can_msg)
         _logger.info("Stopping sender thread, we've got terminated")
 
 
