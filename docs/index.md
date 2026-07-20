@@ -8,7 +8,7 @@ is an implementation of CAN protocols within the Linux kernel that provides a un
 
 This library provides different sets of functionalities:
 
-* core (`import sockcan`): a fast implementation of socketcan protocol. Should perform about 60x faster than `python-can`.
+* core (`import sockcan`): a fast implementation of socketcan protocol. Should perform about 60x faster than `python-can` with the native version (default), and ~4x faster with the pure Python one.
 * daemon (`import sockcan.daemon`): a userspace implementation of the socketcan driver.
 Runs a HTTP daemon over the real CAN bus, applications can subscribe to the daemon and get a socketcan-like socket to read and write to the bus.
 This enables additional capabilities on top of what the underlying driver offers natively, such as concurrent access to the bus from multiple
@@ -33,8 +33,8 @@ For the other features, you need the following extras:
 * server-side (userspace socketcan daemon) and python-can interoperability: `pip install sockcan[daemon]`
 * transcoders (fast encoders/decoders): `pip install sockcan[transcoders]`
 
->[!NOTE]
-> On some shells (e.g., zsh) you might need to escape the brackets with `\` when installing extras (e.g., `pip install sockcan\[daemon\]`)
+!!! note
+    On some shells (e.g., zsh) you might need to escape the brackets with `\` when installing extras (e.g., `pip install sockcan\[daemon\]`)
 
 ### Using the core API directly
 
@@ -70,18 +70,19 @@ hijack_python_can()
 
 No other changes needed. `send` and `recv` should perform one or two orders of magnitude faster.
 
-> [!WARNING]
-> `sockcan` only implements the socketcan interface, and unlike python-can is not a generic API over many CAN drivers.
-This will only override the python-can implementation for socketcan, it won't change it for other drivers.
+!!! warning
+    `sockcan` only implements the socketcan interface, and unlike python-can is not a generic API over many CAN drivers.
+    This will only override the python-can implementation for socketcan, it won't change it for other drivers.
 
 ### Standalone commands for the daemon
->
->[!NOTE]
-> `daemon` extra should be installed.
+
+!!! note
+    `daemon` extra should be installed.
 
 You can try out the userspace socketcan implementation (sockcan daemon) with the following commands out-of-the-box:
 
 * `python -m sockcan.daemon --help`
+
 ```console
 Usage: python -m sockcan.daemon [OPTIONS] COMMAND [ARGS]...
 
@@ -99,6 +100,7 @@ Commands:
 ```
 
 To start a socketcan daemon, run `python -m sockcan.daemon run-daemon`:
+
 ```
 python -m sockcan.daemon run-daemon --help
 Usage: python -m sockcan.daemon run-daemon [OPTIONS] [CHANNEL]
@@ -114,6 +116,7 @@ Options:
 
 The `candump` and `busload` CLI commands provide utilities similar to the ones from the `can-utils` package on Linux. You can get candumps, or evaluate bus load.
 This is particularly useful when working with drivers that cannot natively share the bus between processes (e.g. PCAN Basic library).
+
 ```
 Usage: python -m sockcan.daemon candump [OPTIONS]
 

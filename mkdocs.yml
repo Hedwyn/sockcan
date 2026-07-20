@@ -7,6 +7,7 @@ validation:
     not_found: info
 
 markdown_extensions:
+  - admonition
   - pymdownx.highlight:
       anchor_linenums: true
       line_spans: __span
@@ -35,4 +36,4 @@ nav:
       - "API Reference": reference/api.md
       - "Error Codes": reference/error_codes.md
 
-theme: material
+theme: readthedocs

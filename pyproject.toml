@@ -17,7 +17,7 @@ dependencies = []
 transcoders = ["cantools"]
 daemon = ["click", "python-can"]
 test = ["hypothesis", "pytest", "python-can", "cantools"]
-docs = ["mkdocs", "mkdocs-material"]
+docs = ["mkdocs"]
 lint = ["ruff", "mypy"]
 # an extra that contains all other extras relevant for users of sockcan
 all_inclusive = ["python-can", "cantools", "click", "python-can"]
