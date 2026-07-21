@@ -60,9 +60,9 @@ def _matches_filters(
         return True
     for can_filter in filters:
         mask = can_filter["can_mask"]
-        if (
-            (can_id & mask) == (can_filter["can_id"] & mask) and "extended" not in can_filter
-        ) or is_extended == can_filter.get("extended", False):
+        id_matches = (can_id & mask) == (can_filter["can_id"] & mask)
+        extended_matches = "extended" not in can_filter or is_extended == can_filter["extended"]
+        if id_matches and extended_matches:
             return True
     return False
 
@@ -291,6 +291,27 @@ def _init_global_server(bus_parameters: BusParameters | None = None) -> Socketca
     return server
 
 
+def _init_daemon(parameters: list[BusParameters], config: SocketcanDaemonConfig) -> None:
+    daemon = SocketcanDaemon(
+        config.host,
+        config.port,
+        contention_time=config.min_contention_time,
+    )
+    config.port = daemon.port
+    for params in parameters:
+        if params.virtual:
+            daemon.register_virtual_bus(params.channel)
+        else:
+            daemon.register_bus(
+                channel=params.channel,
+                interface=params.interface,
+                bitrate=params.bitrate,
+                use_native_timestamps=config.use_native_timestamps,
+            )
+    daemon.start()
+    atexit.register(daemon.stop)
+
+
 def activate_userspace_socketcan(
     parameters: BusParameters | list[BusParameters] | None,
     config: SocketcanDaemonConfig | None = None,
@@ -349,25 +370,7 @@ def activate_userspace_socketcan(
                     "Daemon did not reply, and running daemon locally is disabled in config. "
                     "If you want to run daemon locally, enabel `allow_run_daemon_locally`",
                 )
-
-            daemon = SocketcanDaemon(
-                config.host,
-                config.port,
-                contention_time=config.min_contention_time,
-            )
-            config.port = daemon.port
-            for params in parameters:
-                if params.virtual:
-                    daemon.register_virtual_bus(params.channel)
-                else:
-                    daemon.register_bus(
-                        channel=params.channel,
-                        interface=params.interface,
-                        bitrate=params.bitrate,
-                        use_native_timestamps=config.use_native_timestamps,
-                    )
-            daemon.start()
-            atexit.register(daemon.stop)
+            _init_daemon(parameters, config)
     _hijack_python_can(UserspaceSocketcanBus)
 
 

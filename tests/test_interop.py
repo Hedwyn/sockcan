@@ -21,7 +21,7 @@ from sockcan.fixtures import (
     skip_if_windows,
     tx_can_bus,
 )
-from sockcan.interop import FastSocketcanBus, override_python_can
+from sockcan.interop import FastSocketcanBus, _matches_filters, override_python_can
 
 if TYPE_CHECKING:
     from can import Message as PyCanMessage
@@ -29,6 +29,34 @@ if TYPE_CHECKING:
 
 _ = tx_can_bus
 _ = rx_can_bus
+
+
+def test_matches_filters_rejects_non_matching_extended_id() -> None:
+    """
+    A filter scoped to one extended CAN ID must not match an unrelated extended
+    CAN ID just because both frames are extended.
+
+    Regression test: operator precedence in the old implementation turned the
+    check into `(id_matches and no_extended_key) or (is_extended == filter_extended)`,
+    so any two extended frames matched any extended filter regardless of ID.
+    """
+    afe6_only_filter = [{"can_id": 0x060780A5, "can_mask": 0x1FFFFFFF, "extended": True}]
+
+    assert _matches_filters(afe6_only_filter, 0x060780A5, is_extended=True) is True
+    assert _matches_filters(afe6_only_filter, 0x020780A5, is_extended=True) is False
+
+
+def test_matches_filters_without_extended_key_matches_either_kind() -> None:
+    """A filter that doesn't specify `extended` matches on ID alone, either kind of frame."""
+    id_only_filter = [{"can_id": 0x060780A5, "can_mask": 0x1FFFFFFF}]
+
+    assert _matches_filters(id_only_filter, 0x060780A5, is_extended=True) is True
+    assert _matches_filters(id_only_filter, 0x060780A5, is_extended=False) is True
+    assert _matches_filters(id_only_filter, 0x020780A5, is_extended=True) is False
+
+
+def test_matches_filters_empty_accepts_everything() -> None:
+    assert _matches_filters([], 0x123, is_extended=True) is True
 
 
 @skip_if_no_vcan()
