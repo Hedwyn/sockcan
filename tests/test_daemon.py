@@ -25,6 +25,7 @@ from sockcan.daemon import (
     SocketcanServer,
     connect_socketcan_client,
 )
+from sockcan.daemon._server import _frame_matches
 from sockcan.fixtures import (
     can_messages,
     is_windows,
@@ -44,6 +45,37 @@ if TYPE_CHECKING:
 
 _ = tx_can_bus
 _ = rx_can_bus
+
+
+def test_frame_matches_rejects_non_matching_extended_id() -> None:
+    """
+    A consumer subscribed to one extended CAN ID must not receive frames for an
+    unrelated extended CAN ID just because both are extended.
+
+    Regression test: operator precedence turned the check into
+    `(id_matches and no_extended_key) or (is_extended == filter_extended)`, so
+    any two extended frames matched any extended-flagged filter regardless of ID
+    -- this is what let one CAN module's daemon-relayed frames reach a consumer
+    that had subscribed to a different module's stack position.
+    """
+    afe6_only_filter = [{"can_id": 0x060780A5, "can_mask": 0x1FFFFFFF, "extended": True}]
+
+    assert _frame_matches(afe6_only_filter, 0x060780A5, is_extended=True) is True
+    assert _frame_matches(afe6_only_filter, 0x020780A5, is_extended=True) is False
+
+
+def test_frame_matches_without_extended_key_matches_either_kind() -> None:
+    """A filter that doesn't specify `extended` matches on ID alone, either kind of frame."""
+    id_only_filter = [{"can_id": 0x060780A5, "can_mask": 0x1FFFFFFF}]
+
+    assert _frame_matches(id_only_filter, 0x060780A5, is_extended=True) is True
+    assert _frame_matches(id_only_filter, 0x060780A5, is_extended=False) is True
+    assert _frame_matches(id_only_filter, 0x020780A5, is_extended=True) is False
+
+
+def test_frame_matches_empty_accepts_everything() -> None:
+    assert _frame_matches(None, 0x123, is_extended=True) is True
+
 
 # Whether the socketcan socket should be created using python-can
 # or our own implementation

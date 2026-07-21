@@ -87,10 +87,9 @@ def _frame_matches(
         return True
     for can_filter in filters:
         filter_can_mask = can_filter["can_mask"]
-        if (
-            (can_id & filter_can_mask) == (can_filter["can_id"] & filter_can_mask)
-            and "extended" not in can_filter
-        ) or is_extended == can_filter.get("extended", False):
+        id_matches = (can_id & filter_can_mask) == (can_filter["can_id"] & filter_can_mask)
+        extended_matches = "extended" not in can_filter or is_extended == can_filter["extended"]
+        if id_matches and extended_matches:
             return True
     return False
 
