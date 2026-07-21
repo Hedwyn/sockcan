@@ -11,8 +11,10 @@ import atexit
 import logging
 import os
 import platform
+import sys
 from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, Literal, Self
 
 import can
@@ -34,7 +36,7 @@ from sockcan.daemon import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Generator
 
     from can.typechecking import CanFilter, CanFilters, Channel
 
@@ -263,6 +265,19 @@ class UserspaceSocketcanBus:
         self.socket.close()
 
 
+def _register_backend(factory: Callable[..., object], *, name: str) -> tuple[str, str] | None:
+    """
+    Binds `factory` under `name` on this module, then points python-can's
+    "socketcan" backend at it (python-can only calls `cls(channel, **kwargs)`,
+    so a plain function or a `partial` works just as well as a class).
+    Returns the overriden values so that they can be easily restored.
+    """
+    setattr(sys.modules[__name__], name, factory)
+    former_factory = BACKENDS.get("socketcan", None)
+    BACKENDS["socketcan"] = ("sockcan.interop", name)
+    return former_factory
+
+
 def _hijack_python_can(
     bus_cls: type[FastSocketcanBus | UserspaceSocketcanBus] = FastSocketcanBus,
 ) -> tuple[str, str] | None:
@@ -270,10 +285,26 @@ def _hijack_python_can(
     Swaps python-can socketcan's implementation by ours,
     and returns the overriden values so that they can be easily restored.
     """
-    # Registration format used by python-can is (import path, class name)
-    former_factory = BACKENDS.get("socketcan", None)
-    BACKENDS["socketcan"] = ("sockcan.interop", bus_cls.__name__)
-    return former_factory
+    return _register_backend(bus_cls, name=bus_cls.__name__)
+
+
+def _create_deferred_userspace_socketcan_bus(
+    parameters: list[BusParameters],
+    config: SocketcanDaemonConfig,
+    channel: Channel,
+    can_filters: CanFilters | None = None,
+    socket: SocketcanFd | None = None,
+    **kwargs: object,
+) -> UserspaceSocketcanBus:
+    """
+    Bus factory registered with python-can when `activate_userspace_socketcan`
+    is called with `defer=True`: starts the daemon on this, the first
+    connection, re-registers the plain `UserspaceSocketcanBus` so later
+    connections skip this indirection, then behaves like it itself.
+    """
+    _init_daemon(parameters, config)
+    _hijack_python_can(UserspaceSocketcanBus)
+    return UserspaceSocketcanBus(channel, can_filters, socket, **kwargs)
 
 
 def _init_global_server(bus_parameters: BusParameters | None = None) -> SocketcanServer:
@@ -312,11 +343,42 @@ def _init_daemon(parameters: list[BusParameters], config: SocketcanDaemonConfig)
     atexit.register(daemon.stop)
 
 
+def _prepare_daemon_init(
+    parameters: list[BusParameters],
+    config: SocketcanDaemonConfig,
+    *,
+    defer: bool,
+) -> Callable[..., UserspaceSocketcanBus] | None:
+    """
+    Starts the daemon immediately, unless `defer` is set, in which case a
+    bus factory that starts it lazily on the first connection is returned
+    instead. Returns `None` when the plain `UserspaceSocketcanBus` should be
+    registered right away (daemon already running, or not deferring).
+    """
+    if config.port == 0 and (env_port := os.environ.get("SOCKCAN_DAEMON_PORT")):
+        config.port = int(env_port)
+    if config.port and ping_daemon(config.host, config.port):
+        _logger.info(
+            "Daemon is already up and run by another process, using the detected instance",
+        )
+        return None
+    if not config.allow_run_daemon_locally:
+        raise RuntimeError(
+            "Daemon did not reply, and running daemon locally is disabled in config. "
+            "If you want to run daemon locally, enabel `allow_run_daemon_locally`",
+        )
+    if defer:
+        return partial(_create_deferred_userspace_socketcan_bus, parameters, config)
+    _init_daemon(parameters, config)
+    return None
+
+
 def activate_userspace_socketcan(
     parameters: BusParameters | list[BusParameters] | None,
     config: SocketcanDaemonConfig | None = None,
     *,
     system: str | None = None,
+    defer: bool = False,
 ) -> None:
     """
     WARNING: mutating global shared state here.
@@ -326,6 +388,10 @@ def activate_userspace_socketcan(
     Then injects a compatible socketcan implementation
     in python-can's backend.
     Resources will be released on interpreter exit.
+
+    If `defer` is set and a daemon needs to be started locally, its startup
+    (`_init_daemon`) is postponed until the first bus connects instead of
+    happening immediately.
     """
     global _global_config
     config = config or _global_config
@@ -349,6 +415,7 @@ def activate_userspace_socketcan(
     elif isinstance(parameters, BusParameters):
         parameters = [parameters]
 
+    deferred_bus_factory: Callable[..., UserspaceSocketcanBus] | None = None
     if config.mode == "local":
         for params in parameters:
             channel = params.channel
@@ -358,20 +425,12 @@ def activate_userspace_socketcan(
             _local_servers[channel] = server
 
     elif config.mode == "daemon":
-        if config.port == 0 and (env_port := os.environ.get("SOCKCAN_DAEMON_PORT")):
-            config.port = int(env_port)
-        if config.port and ping_daemon(config.host, config.port):
-            _logger.info(
-                "Daemon is already up and run by another process, using the detected instance",
-            )
-        else:
-            if not config.allow_run_daemon_locally:
-                raise RuntimeError(
-                    "Daemon did not reply, and running daemon locally is disabled in config. "
-                    "If you want to run daemon locally, enabel `allow_run_daemon_locally`",
-                )
-            _init_daemon(parameters, config)
-    _hijack_python_can(UserspaceSocketcanBus)
+        deferred_bus_factory = _prepare_daemon_init(parameters, config, defer=defer)
+
+    if deferred_bus_factory is None:
+        _hijack_python_can(UserspaceSocketcanBus)
+    else:
+        _register_backend(deferred_bus_factory, name="_DeferredUserspaceSocketcanBus")
 
 
 @contextmanager
