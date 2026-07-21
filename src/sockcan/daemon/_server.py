@@ -447,7 +447,7 @@ class SocketcanServer:
         sleep = time.sleep
         monotonic_time_ns = time.monotonic_ns
         contention_time_ns = None if contention_time is None else round(contention_time * 1e9)
-        last_sent: float = 0.0
+        last_sent: int = 0
         while self._running:
             selector_events = selector.select()
             for key, _ in selector_events:
