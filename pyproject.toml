@@ -1,6 +1,11 @@
 [build-system]
 # Note: cantools only there because mypyc needs the type stubs at install-time
-requires = ["hatchling", "hatch-vcs", "smelt[build]==0.6.1", "cantools"]
+requires = [
+  "hatchling",
+  "hatch-vcs",
+  "smelt[build]@git+ssh://git@github.com/Hedwyn/smelt.git",
+  "cantools",
+]
 build-backend = "hatchling.build"
 
 [project]
