@@ -21,13 +21,13 @@ import socket
 import struct
 import time
 import warnings
-from collections.abc import Callable, Generator
+from collections import deque
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum, auto
 from functools import cache, partial
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from selectors import EVENT_READ, DefaultSelector
+from selectors import EVENT_READ, EVENT_WRITE, DefaultSelector
 from socketserver import ThreadingMixIn
 from threading import Event, Thread
 from typing import TYPE_CHECKING, NamedTuple, Self, cast
@@ -36,11 +36,13 @@ from urllib.parse import parse_qs, unquote, urlparse
 import can
 from can import BusState, Message
 
-from sockcan import SendFn, SocketcanFd, build_recv_func, build_send_func
+from sockcan import RecvFn, SendFn, SocketcanFd, build_recv_func, build_send_func
 
 from ._client import ping_daemon
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     from _typeshed import FileDescriptorLike
     from can import BusABC
     from can.typechecking import CanFilter
@@ -151,6 +153,30 @@ ENDPOINT_NOT_CONNECTED_ERRNO = errno.ENOTCONN
 CONNECTION_REFUSED_ERRRNO = errno.ECONNREFUSED
 
 
+def _set_send_timeout(sock: socket.socket, seconds: float) -> None:
+    """
+    Bounds this socket's send() calls without affecting recv() or blocking mode.
+
+    Uses raw SO_SNDTIMEO instead of sock.settimeout(), since the latter also
+    bounds recv() and flips the fd to non-blocking mode internally, which
+    would break the stream framing recv_fn relies on and violate this
+    module's invariant that consumer sockets stay in blocking mode.
+    """
+    if platform.system() == "Windows":
+        sock.setsockopt(
+            socket.SOL_SOCKET,
+            socket.SO_SNDTIMEO,
+            struct.pack("I", round(seconds * 1000)),
+        )
+    else:
+        whole = int(seconds)
+        sock.setsockopt(
+            socket.SOL_SOCKET,
+            socket.SO_SNDTIMEO,
+            struct.pack("ll", whole, round((seconds - whole) * 1e6)),
+        )
+
+
 class ServerDirection(Enum):
     """
     In which direction(s) the socketcan server should work.
@@ -173,9 +199,6 @@ class BusParameters:
     virtual: bool = False
 
 
-type RecvFn = Callable[[], Message]
-
-
 class _Consumer(NamedTuple):
     """
     Stores the information required about a consumer in a minimal format.
@@ -184,6 +207,23 @@ class _Consumer(NamedTuple):
     sender: SendFn
     fd: FileDescriptorLike
     filters: list[CanFilter] | None
+
+
+class _ConsumerIO:
+    """
+    Per-consumer selector state.
+
+    Pairs a consumer's send/recv functions with its outbound backlog, so the
+    RX thread (writer) and TX thread (selector owner) can share the same
+    queue for frames that couldn't be sent inline within `send_timeout`.
+    """
+
+    __slots__ = ("outbound", "recv_fn", "sender")
+
+    def __init__(self, sender: SendFn, recv_fn: RecvFn) -> None:
+        self.sender = sender
+        self.recv_fn = recv_fn
+        self.outbound: deque[tuple[int, bytes | bytearray, bool]] = deque()
 
 
 class SocketcanServer:
@@ -202,6 +242,7 @@ class SocketcanServer:
         use_native_timestamps: bool = False,
         use_stream: bool = False,
         contention_time: float | None = None,
+        send_timeout: float = 0.001,
     ) -> None:
         """
         Wraps the passed `bus`. For interfaces that do not support concurrency
@@ -212,8 +253,15 @@ class SocketcanServer:
 
         If `contention_time` is passed, the configured delay (in seconds)
         will be applied between messages.
+
+        `send_timeout` bounds how long the RX thread's direct send to a stream
+        consumer may block (via SO_SNDTIMEO) before that frame is queued and
+        handed off to the TX thread's selector, so a single stuck consumer
+        cannot stall forwarding to the others. Only applies to stream-mode
+        consumers.
         """
         self._consumers: list[_Consumer] = []
+        self._consumer_io: dict[FileDescriptorLike, _ConsumerIO] = {}
         self._kill_switch = Event
         self._bus = bus
         self._selector = DefaultSelector()
@@ -224,6 +272,7 @@ class SocketcanServer:
         self._selector.register(self._kill_switch_rx, events=EVENT_READ, data=None)
         self._use_stream = use_stream
         self.contention_time = contention_time
+        self._send_timeout = send_timeout
 
     @property
     def bus(self) -> BusABC | None:
@@ -266,12 +315,16 @@ class SocketcanServer:
             use_native_timestamps=self.use_native_timestamps,
             is_stream=use_stream,
         )
+        if use_stream:
+            _set_send_timeout(fd, self._send_timeout)
+        io_state = _ConsumerIO(send_fn, recv_fn)
         _logger.info("Registering new consumer with filters: %s", normalized_filters)
         self._consumers.append(_Consumer(send_fn, fd, normalized_filters))
+        self._consumer_io[fd] = io_state
         # KeyError is expected if Socket is already registered (e.g., HTTP upgrade socket)
         # This is fine, we'll handle it in the HTTP handler thread
         with contextlib.suppress(KeyError):
-            self._selector.register(fd, events=EVENT_READ, data=recv_fn)
+            self._selector.register(fd, events=EVENT_READ, data=io_state)
         if self.running:
             # interrupting selection to refresh selection targets
             self._kill_switch_tx.send(b"0")
@@ -383,12 +436,16 @@ class SocketcanServer:
         assert self._bus is not None, "RX thread can only real in non-virtual mode"
         recv = self._bus.recv
         consumers = self._consumers
+        consumer_io = self._consumer_io
+        selector = self._selector
+        kill_switch_tx = self._kill_switch_tx
         closed_connections: list[_Consumer] = []
         is_stream = self._use_stream
         while True:
             if closed_connections:
                 for consumer in closed_connections:
                     consumers.remove(consumer)
+                    del consumer_io[consumer.fd]
                 closed_connections.clear()
 
             next_message = recv()
@@ -398,20 +455,36 @@ class SocketcanServer:
             is_extended = next_message.is_extended_id
 
             for consumer in consumers:
-                sender, _, filters = consumer
+                sender, fd, filters = consumer
                 if not _frame_matches(filters, can_id, is_extended=is_extended):
                     continue
 
+                io_state = consumer_io[fd]
+                outbound = io_state.outbound
+                if outbound:
+                    # Already backed up: keep ordering, let the TX thread's
+                    # selector drain the backlog instead of racing ahead.
+                    outbound.append((can_id, data, is_extended))
+                    continue
                 try:
-                    sender(can_id, data, next_message.is_extended_id, None)
-                except BrokenPipeError:
+                    sender(can_id, data, is_extended, None)
+                except TimeoutError:
+                    # SO_SNDTIMEO fired: consumer can't keep up right now.
+                    # Queue the frame and hand it off to the TX thread.
+                    outbound.append((can_id, data, is_extended))
+                    selector.modify(fd, EVENT_READ | EVENT_WRITE, io_state)
+                    kill_switch_tx.send(b"0")
+                except (BrokenPipeError, ConnectionResetError):
                     _logger.info("Client closed connection")
                     closed_connections.append(consumer)
                 except OSError as exc:
-                    if not is_stream and exc.errno not in [
+                    if is_stream:
+                        _logger.warning("Send to consumer failed: %s", exc)
+                        closed_connections.append(consumer)
+                    elif exc.errno not in (
                         ENDPOINT_NOT_CONNECTED_ERRNO,
                         CONNECTION_REFUSED_ERRRNO,
-                    ]:
+                    ):
                         raise
                     # for DGRAM sockets, just ignoring,
                     # this errno means the other side is not listening
@@ -449,10 +522,10 @@ class SocketcanServer:
         last_sent: int = 0
         while self._running:
             selector_events = selector.select()
-            for key, _ in selector_events:
+            for key, events in selector_events:
                 fileobj = key.fileobj
-                recv_fn = key.data
-                if recv_fn is None:
+                io_state = key.data
+                if io_state is None:
                     assert fileobj is kill_switch, (
                         "Registered an object with None data that's not the kill switch"
                     )
@@ -464,59 +537,89 @@ class SocketcanServer:
                     # are registered or unregistered
                     continue
 
-                try:
-                    msg = recv_fn()
-                except (struct.error, OSError):
-                    # A consumer disconnecting is normal: the recv helper wraps the
-                    # underlying socket error (e.g. ConnectionResetError on an abrupt
-                    # client close) into a plain OSError, so catch the whole OSError
-                    # family here. Unregister that consumer and keep serving the rest
-                    # instead of letting the TX thread die.
-                    _logger.info("Bus closed")
-                    selector.unregister(key.fileobj)
-                    continue
-
-                # short-circuiting messages between our consumers
-                for send_fn, fd, filters in consumers:
-                    if fd is fileobj:
-                        # skipping, not sending to ourselves
-                        continue
-                    if not _frame_matches(
-                        filters,
-                        msg.arbitration_id,
-                        is_extended=msg.is_extended_id,
-                    ):
-                        # Honour the destination consumer's filters on the
-                        # consumer-to-consumer loopback path too, just like the
-                        # real-bus RX path does. Without this, a consumer that
-                        # subscribed with filters still receives every frame any
-                        # other consumer sends.
-                        continue
+                if events & EVENT_READ:
                     try:
-                        send_fn(msg.arbitration_id, msg.data, msg.is_extended_id, None)
-                    except (BrokenPipeError, ConnectionResetError):
+                        msg = io_state.recv_fn()
+                    except (struct.error, OSError):
+                        # A consumer disconnecting is normal: the recv helper wraps the
+                        # underlying socket error (e.g. ConnectionResetError on an abrupt
+                        # client close) into a plain OSError, so catch the whole OSError
+                        # family here. Unregister that consumer and keep serving the rest
+                        # instead of letting the TX thread die.
+                        _logger.info("Bus closed")
+                        selector.unregister(fileobj)
                         continue
-                    except OSError as exc:
-                        if not is_stream and exc.errno not in [
-                            ENDPOINT_NOT_CONNECTED_ERRNO,
-                            CONNECTION_REFUSED_ERRRNO,
-                        ]:
-                            raise
 
-                if bus_send is not None:
-                    py_can_msg = Message(
-                        arbitration_id=msg.arbitration_id,
-                        is_extended_id=msg.is_extended_id,
-                        data=msg.data,
-                    )
-                    if contention_time_ns:
-                        contention = last_sent + contention_time_ns - monotonic_time_ns()
-                        if contention > 0:
-                            sleep(contention / 1e9)
-                        bus_send(py_can_msg)
-                        last_sent = monotonic_time_ns()
-                    else:
-                        bus_send(py_can_msg)
+                    # short-circuiting messages between our consumers
+                    for send_fn, fd, filters in consumers:
+                        if fd is fileobj:
+                            # skipping, not sending to ourselves
+                            continue
+                        if not _frame_matches(
+                            filters,
+                            msg.arbitration_id,
+                            is_extended=msg.is_extended_id,
+                        ):
+                            # Honour the destination consumer's filters on the
+                            # consumer-to-consumer loopback path too, just like the
+                            # real-bus RX path does. Without this, a consumer that
+                            # subscribed with filters still receives every frame any
+                            # other consumer sends.
+                            continue
+                        try:
+                            send_fn(msg.arbitration_id, msg.data, msg.is_extended_id, None)
+                        except (BrokenPipeError, ConnectionResetError):
+                            continue
+                        except OSError as exc:
+                            if is_stream:
+                                _logger.warning("Send to consumer failed: %s", exc)
+                                continue
+                            if exc.errno not in (
+                                ENDPOINT_NOT_CONNECTED_ERRNO,
+                                CONNECTION_REFUSED_ERRRNO,
+                            ):
+                                raise
+
+                    if bus_send is not None:
+                        py_can_msg = Message(
+                            arbitration_id=msg.arbitration_id,
+                            is_extended_id=msg.is_extended_id,
+                            data=msg.data,
+                        )
+                        if contention_time_ns:
+                            contention = last_sent + contention_time_ns - monotonic_time_ns()
+                            if contention > 0:
+                                sleep(contention / 1e9)
+                            bus_send(py_can_msg)
+                            last_sent = monotonic_time_ns()
+                        else:
+                            bus_send(py_can_msg)
+
+                if events & EVENT_WRITE:
+                    outbound = io_state.outbound
+                    if outbound:
+                        can_id, data, is_extended = outbound[0]
+                        try:
+                            io_state.sender(can_id, data, is_extended, None)
+                        except TimeoutError:
+                            pass  # still backed up, retry on next ready event
+                        except (BrokenPipeError, ConnectionResetError):
+                            selector.unregister(fileobj)
+                            continue
+                        except OSError as exc:
+                            if is_stream:
+                                _logger.warning("Send to consumer failed: %s", exc)
+                                selector.unregister(fileobj)
+                                continue
+                            if exc.errno not in (
+                                ENDPOINT_NOT_CONNECTED_ERRNO,
+                                CONNECTION_REFUSED_ERRRNO,
+                            ):
+                                raise
+                        else:
+                            outbound.popleft()
+                    if not outbound:
+                        selector.modify(fileobj, EVENT_READ, io_state)
         _logger.info("Stopping sender thread, we've got terminated")
 
 
@@ -631,7 +734,11 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
     """
 
     def __init__(
-        self, host: str = "localhost", port: int = 0, contention_time: float | None = None
+        self,
+        host: str = "localhost",
+        port: int = 0,
+        contention_time: float | None = None,
+        send_timeout: float = 0.001,
     ) -> None:
         self._host = host
         if port == 0 and (env_port := os.environ.get("SOCKCAN_DAEMON_PORT")):
@@ -640,6 +747,7 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
         self._port = self._httpd.socket.getsockname()[1]
         _logger.info("Socketcan daemon bound to %s:%d", host, self._port)
         self.contention_time = contention_time
+        self.send_timeout = send_timeout
 
         self._httpd_thread: Thread | None = None
         self._servers: dict[str, SocketcanServer] = {}
@@ -651,7 +759,11 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
         of that bus.
         """
         _logger.info("Registering virtual bus on channel %s", channel)
-        virtual_server = SocketcanServer(use_stream=True, contention_time=self.contention_time)
+        virtual_server = SocketcanServer(
+            use_stream=True,
+            contention_time=self.contention_time,
+            send_timeout=self.send_timeout,
+        )
         self._servers[channel] = virtual_server
         if self.is_running:
             virtual_server.start()
@@ -679,6 +791,7 @@ class SocketcanDaemon(BaseHTTPRequestHandler):
             use_native_timestamps=use_native_timestamps,
             use_stream=True,
             contention_time=self.contention_time,
+            send_timeout=self.send_timeout,
         )
         self._servers[channel] = server
 
