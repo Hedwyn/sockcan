@@ -8,6 +8,7 @@ Entrypoints for both server and client-side utilities.
 from __future__ import annotations
 
 import logging
+import struct
 from time import monotonic
 
 import click
@@ -71,8 +72,8 @@ def client(*, host_ip: str, port: int, channel: str) -> None:
             payload = [f"{i:02x}" for i in next_msg.data]
             payload_str = " ".join(payload)
             click.echo(f"{next_msg.arbitration_id:08x}: {payload_str}")
-    except OSError as error:
-        raise click.ClickException(f"Lost connection to daemon: {error}") from error
+    except (OSError, struct.error) as error:
+        raise click.ClickException("Lost connection to daemon") from error
 
 
 @daemon.command()
@@ -97,8 +98,8 @@ def candump(*, host_ip: str, port: int, channel: str) -> None:
                 f"({next_msg.timestamp:.6f})  {channel}  "
                 f"{next_msg.arbitration_id:0{id_width}X}   [{len(next_msg.data)}]  {payload}",
             )
-    except OSError as error:
-        raise click.ClickException(f"Lost connection to daemon: {error}") from error
+    except (OSError, struct.error) as error:
+        raise click.ClickException("Lost connection to daemon") from error
 
 
 def _frame_bit_count(*, is_extended_id: bool, data_len: int) -> int:
@@ -144,8 +145,8 @@ def busload(*, host_ip: str, port: int, channel: str, bitrate: int, window: floa
                 window_bits = 0
                 window_msg_count = 0
                 window_start = monotonic()
-    except OSError as error:
-        raise click.ClickException(f"Lost connection to daemon: {error}") from error
+    except (OSError, struct.error) as error:
+        raise click.ClickException("Lost connection to daemon") from error
 
 
 @daemon.command()
