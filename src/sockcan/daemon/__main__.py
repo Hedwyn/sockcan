@@ -65,11 +65,14 @@ def client(*, host_ip: str, port: int, channel: str) -> None:
     click.echo("> Connected >")
 
     recv_fn = build_recv_func(sock, use_native_timestamps=False, is_stream=True)
-    while True:
-        next_msg = recv_fn()
-        payload = [f"{i:02x}" for i in next_msg.data]
-        payload_str = " ".join(payload)
-        click.echo(f"{next_msg.arbitration_id:08x}: {payload_str}")
+    try:
+        while True:
+            next_msg = recv_fn()
+            payload = [f"{i:02x}" for i in next_msg.data]
+            payload_str = " ".join(payload)
+            click.echo(f"{next_msg.arbitration_id:08x}: {payload_str}")
+    except OSError as error:
+        raise click.ClickException(f"Lost connection to daemon: {error}") from error
 
 
 @daemon.command()
@@ -85,14 +88,17 @@ def candump(*, host_ip: str, port: int, channel: str) -> None:
     click.echo("> Connected >")
 
     recv_fn = build_recv_func(sock, use_native_timestamps=False, is_stream=True)
-    while True:
-        next_msg = recv_fn()
-        id_width = 8 if next_msg.is_extended_id else 3
-        payload = " ".join(f"{byte:02X}" for byte in next_msg.data)
-        click.echo(
-            f"({next_msg.timestamp:.6f})  {channel}  "
-            f"{next_msg.arbitration_id:0{id_width}X}   [{len(next_msg.data)}]  {payload}",
-        )
+    try:
+        while True:
+            next_msg = recv_fn()
+            id_width = 8 if next_msg.is_extended_id else 3
+            payload = " ".join(f"{byte:02X}" for byte in next_msg.data)
+            click.echo(
+                f"({next_msg.timestamp:.6f})  {channel}  "
+                f"{next_msg.arbitration_id:0{id_width}X}   [{len(next_msg.data)}]  {payload}",
+            )
+    except OSError as error:
+        raise click.ClickException(f"Lost connection to daemon: {error}") from error
 
 
 def _frame_bit_count(*, is_extended_id: bool, data_len: int) -> int:
@@ -121,22 +127,25 @@ def busload(*, host_ip: str, port: int, channel: str, bitrate: int, window: floa
     window_bits = 0
     window_msg_count = 0
     window_start = monotonic()
-    while True:
-        next_msg = recv_fn()
-        window_bits += _frame_bit_count(
-            is_extended_id=next_msg.is_extended_id,
-            data_len=len(next_msg.data),
-        )
-        window_msg_count += 1
+    try:
+        while True:
+            next_msg = recv_fn()
+            window_bits += _frame_bit_count(
+                is_extended_id=next_msg.is_extended_id,
+                data_len=len(next_msg.data),
+            )
+            window_msg_count += 1
 
-        elapsed = monotonic() - window_start
-        if elapsed >= window:
-            load_pct = 100.0 * window_bits / (bitrate * elapsed)
-            msg_per_sec = window_msg_count / elapsed
-            click.echo(f"Bus load: {load_pct:5.1f}%  |  {msg_per_sec:7.1f} msg/s")
-            window_bits = 0
-            window_msg_count = 0
-            window_start = monotonic()
+            elapsed = monotonic() - window_start
+            if elapsed >= window:
+                load_pct = 100.0 * window_bits / (bitrate * elapsed)
+                msg_per_sec = window_msg_count / elapsed
+                click.echo(f"Bus load: {load_pct:5.1f}%  |  {msg_per_sec:7.1f} msg/s")
+                window_bits = 0
+                window_msg_count = 0
+                window_start = monotonic()
+    except OSError as error:
+        raise click.ClickException(f"Lost connection to daemon: {error}") from error
 
 
 @daemon.command()

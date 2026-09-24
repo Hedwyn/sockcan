@@ -217,6 +217,8 @@ def _socketcan_recv_stream(
     except OSError as error:
         msg = f"Error receiving: {error.strerror}"
         raise exc_class(msg) from error
+    if not cf:
+        raise exc_class("Connection closed by peer")
     can_id, can_dlc, _ = _header_unpack(cf)
 
     # Note: `'not not' is faster than bool
