@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from functools import cache, partial
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from queue import Empty, SimpleQueue
 from selectors import EVENT_READ, EVENT_WRITE, DefaultSelector
 from socketserver import ThreadingMixIn
 from threading import Event, Thread
@@ -262,6 +263,10 @@ class SocketcanServer:
         """
         self._consumers: list[_Consumer] = []
         self._consumer_io: dict[FileDescriptorLike, _ConsumerIO] = {}
+        # TX thread reports fds it unregisters here; only the RX thread ever
+        # removes entries from `_consumers`/`_consumer_io`, so this queue is
+        # the sole cross-thread hand-off, keeping both collections single-writer.
+        self._dead_consumer_fds: SimpleQueue[FileDescriptorLike] = SimpleQueue()
         self._kill_switch = Event
         self._bus = bus
         self._selector = DefaultSelector()
@@ -439,6 +444,7 @@ class SocketcanServer:
         consumer_io = self._consumer_io
         selector = self._selector
         kill_switch_tx = self._kill_switch_tx
+        dead_consumer_fds = self._dead_consumer_fds
         closed_connections: list[_Consumer] = []
         is_stream = self._use_stream
         while True:
@@ -447,6 +453,19 @@ class SocketcanServer:
                     consumers.remove(consumer)
                     del consumer_io[consumer.fd]
                 closed_connections.clear()
+
+            while True:
+                try:
+                    dead_fd = dead_consumer_fds.get_nowait()
+                except Empty:
+                    break
+                # TX thread already unregistered/closed this consumer; drop it
+                # here too so a stuck consumer's backlog can't grow forever.
+                consumer_io.pop(dead_fd, None)
+                for consumer in consumers:
+                    if consumer.fd is dead_fd:
+                        consumers.remove(consumer)
+                        break
 
             next_message = recv()
             assert next_message is not None
@@ -515,6 +534,7 @@ class SocketcanServer:
         contention_time = self.contention_time
         kill_switch = self._kill_switch_rx
         consumers = self._consumers
+        dead_consumer_fds = self._dead_consumer_fds
         is_stream = self._use_stream
         sleep = time.sleep
         monotonic_time_ns = time.monotonic_ns
@@ -548,6 +568,7 @@ class SocketcanServer:
                         # instead of letting the TX thread die.
                         _logger.info("Bus closed")
                         selector.unregister(fileobj)
+                        dead_consumer_fds.put(fileobj)
                         continue
 
                     # short-circuiting messages between our consumers
@@ -605,11 +626,13 @@ class SocketcanServer:
                             pass  # still backed up, retry on next ready event
                         except (BrokenPipeError, ConnectionResetError):
                             selector.unregister(fileobj)
+                            dead_consumer_fds.put(fileobj)
                             continue
                         except OSError as exc:
                             if is_stream:
                                 _logger.warning("Send to consumer failed: %s", exc)
                                 selector.unregister(fileobj)
+                                dead_consumer_fds.put(fileobj)
                                 continue
                             if exc.errno not in (
                                 ENDPOINT_NOT_CONNECTED_ERRNO,
