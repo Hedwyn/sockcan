@@ -3,7 +3,7 @@
 requires = [
   "hatchling",
   "hatch-vcs",
-  "smelt[build]@git+ssh://git@github.com/Hedwyn/smelt.git",
+  "smelt[build]@git+ssh://git@github.com/Hedwyn/smelt.git@release-0.8",
   "cantools",
 ]
 build-backend = "hatchling.build"
