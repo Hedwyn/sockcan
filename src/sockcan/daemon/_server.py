@@ -614,8 +614,8 @@ class SocketcanServer:
                             contention = last_sent + contention_time_ns - monotonic_time_ns()
                             if contention > 0:
                                 sleep(contention / 1e9)
-                            bus_send(py_can_msg)
                             last_sent = monotonic_time_ns()
+                            bus_send(py_can_msg)
                         else:
                             bus_send(py_can_msg)
 
