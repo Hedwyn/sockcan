@@ -493,7 +493,10 @@ class SocketcanServer:
                     outbound.append((can_id, data, is_extended))
                     selector.modify(fd, EVENT_READ | EVENT_WRITE, io_state)
                     kill_switch_tx.send(b"0")
-                except (BrokenPipeError, ConnectionResetError):
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                    # ConnectionAbortedError (WinError 10053) happens on Windows
+                    # when SO_SNDTIMEO fires: Winsock tears down the connection
+                    # instead of just timing out the call, unlike Linux.
                     _logger.info("Client closed connection")
                     closed_connections.append(consumer)
                 except OSError as exc:
@@ -589,7 +592,7 @@ class SocketcanServer:
                             continue
                         try:
                             send_fn(msg.arbitration_id, msg.data, msg.is_extended_id, None)
-                        except (BrokenPipeError, ConnectionResetError):
+                        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                             continue
                         except OSError as exc:
                             if is_stream:
@@ -624,7 +627,7 @@ class SocketcanServer:
                             io_state.sender(can_id, data, is_extended, None)
                         except TimeoutError:
                             pass  # still backed up, retry on next ready event
-                        except (BrokenPipeError, ConnectionResetError):
+                        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                             selector.unregister(fileobj)
                             dead_consumer_fds.put(fileobj)
                             continue
