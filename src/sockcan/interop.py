@@ -168,8 +168,9 @@ class UserspaceSocketcanBus:
             # Pass can_filters directly to _get_socket
             socket = self._get_socket(channel, can_filters)
         self.socket = socket
-        self.send = build_send_func(self.socket, expects_msg_cls=True)
         is_stream = _global_config.mode == "daemon" or not hasattr(socket, "AF_UNIX")
+        # Note: send and recv must agree on the framing, see `build_send_func`.
+        self.send = build_send_func(self.socket, expects_msg_cls=True, is_stream=is_stream)
         self._base_recv = build_recv_func(
             self.socket,
             use_native_timestamps=False,

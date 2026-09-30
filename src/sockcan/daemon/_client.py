@@ -14,6 +14,8 @@ import socket
 from typing import TYPE_CHECKING, cast
 from urllib.parse import quote
 
+from sockcan import disable_nagle
+
 if TYPE_CHECKING:
     from can.typechecking import CanFilter
 
@@ -73,6 +75,9 @@ def connect_socketcan_client(
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     # 2. Connect to the server
     sock.connect((host, port))
+    # Frames are written one by one, 16 bytes at a time: without this, Nagle
+    # coalesces them and the pacing the caller applied between two frames is lost.
+    disable_nagle(sock)
     _logger.info("Connected to %s:%d", host, port)
 
     # 3. Construct the HTTP Upgrade Request

@@ -15,6 +15,7 @@ from ._protocol import (
     build_recv_func,
     build_send_func,
     connect_to_socketcan,
+    disable_nagle,
 )
 
 __all__ = [
@@ -25,4 +26,5 @@ __all__ = [
     "build_recv_func",
     "build_send_func",
     "connect_to_socketcan",
+    "disable_nagle",
 ]

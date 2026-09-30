@@ -7,14 +7,17 @@ Implements the binary protoco defined by socketcan.
 
 from __future__ import annotations
 
+import logging
 import socket
 import struct
-from collections.abc import Callable
+from collections.abc import Buffer, Callable
 from dataclasses import dataclass
 from enum import Enum, auto
 from functools import lru_cache, partial
 from time import time_ns
 from typing import Any, Literal, NamedTuple, NewType, Protocol, cast, overload
+
+_logger = logging.getLogger(__name__)
 
 SocketcanFd = NewType("SocketcanFd", socket.socket)
 
@@ -43,6 +46,25 @@ class CanMessage:
     def __str__(self) -> str:
         payload = " ".join([f"{b:02x}" for b in self.data])
         return f"{self.arbitration_id:08x}:{payload}"
+
+
+def disable_nagle(sock: socket.socket) -> None:
+    """
+    Turns off Nagle's algorithm on `sock`, when it applies to it.
+
+    Frames are 16 bytes, so Nagle would hold every one of them back until the
+    previous one is acknowledged, then release the lot as a burst. That trades the
+    pacing the caller asked for against a stall of up to a round-trip - fatal for
+    a protocol whose consumers time their frames. Only TCP sockets are concerned;
+    anything else (AF_UNIX, datagram) is left untouched.
+    """
+    if sock.family not in (socket.AF_INET, socket.AF_INET6) or sock.type != socket.SOCK_STREAM:
+        return
+    try:
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    except OSError as error:
+        # Not worth failing a working connection over: Nagle only costs latency.
+        _logger.warning("Could not disable Nagle's algorithm: %s", error)
 
 
 def get_received_ancillary_buf_size() -> int:
@@ -193,6 +215,39 @@ def _socketcan_recv(
 type _RecvFn = Callable[[int], bytes]
 
 
+def _complete_frame(
+    recv_fn: _RecvFn,
+    first_chunk: bytes,
+    exc_class: type[Exception],
+    msg_size: int,
+) -> bytes:
+    """
+    Slow path of `_socketcan_recv_stream`, for a frame split across several reads.
+
+    A stream socket may return less than the requested size. Decoding a short read as
+    if it were a whole frame would both mis-decode it and leave the remaining bytes in
+    the stream, shifting every subsequent frame on that connection - that desync is
+    permanent, so the frame has to be completed here instead.
+    """
+    chunks = [first_chunk]
+    received = len(first_chunk)
+    while received < msg_size:
+        try:
+            chunk = recv_fn(msg_size - received)
+        except OSError as error:
+            raise exc_class(
+                f"Error receiving: {error.strerror} "
+                f"(mid-frame, got {received} bytes out of {msg_size})",
+            ) from error
+        if not chunk:
+            raise exc_class(
+                f"Connection closed by peer mid-frame: got {received} bytes out of {msg_size}",
+            )
+        chunks.append(chunk)
+        received += len(chunk)
+    return b"".join(chunks)
+
+
 def _socketcan_recv_stream(
     recv_fn: _RecvFn,
     timeout: float | None = None,
@@ -219,6 +274,9 @@ def _socketcan_recv_stream(
         raise exc_class(msg) from error
     if not cf:
         raise exc_class("Connection closed by peer")
+    if len(cf) < _msg_size:
+        # Slow path: a stream socket is free to hand back less than we asked for.
+        cf = _complete_frame(recv_fn, cf, exc_class, _msg_size)
     can_id, can_dlc, _ = _header_unpack(cf)
 
     # Note: `'not not' is faster than bool
@@ -277,7 +335,55 @@ def build_tx_header(
 
 
 class SendMsgFn(Protocol):
-    def __call__(self, data: bytes, flags: int = 0, /) -> int: ...
+    # `data` is deliberately loose: the frame completion path hands over a memoryview
+    # of the payload rather than slicing a fresh bytes object out of it.
+    def __call__(self, data: Buffer, flags: int = 0, /) -> int: ...
+
+
+# How many consecutive zero-progress attempts a half-written frame is given before the
+# consumer is declared unreachable. Stream consumers carry SO_SNDTIMEO, so this bounds
+# how long a stuck one may hold the sender: `send_timeout` * that many.
+STREAM_SEND_ATTEMPTS = 5
+
+
+def _complete_send(
+    send_fn: SendMsgFn,
+    payload: bytes,
+    sent: int,
+    msg_size: int,
+    attempts: int,
+) -> None:
+    """
+    Slow path of the stream senders, for a frame the socket only accepted part of.
+
+    A stream socket may accept less than the whole payload. Those bytes are on the wire
+    already and cannot be taken back, so the frame has to be finished: abandoning it here
+    would shift every subsequent frame on that connection, and re-queueing it for a later
+    retry - which is what the backlog path does on a timeout - would put its first bytes
+    on the wire twice. Bounded by `attempts` consecutive attempts without progress, after
+    which the connection is unusable and is reported as such, rather than left desynced.
+
+    Note that a send refused outright (nothing written, hence a raised `TimeoutError`)
+    never reaches here: that frame is not committed, so it can safely be queued and
+    retried whole by the caller.
+    """
+    view = memoryview(payload)
+    remaining_attempts = attempts
+    while sent < msg_size:
+        try:
+            written = send_fn(view[sent:])
+        except (TimeoutError, BlockingIOError):
+            written = 0
+        if written:
+            sent += written
+            remaining_attempts = attempts
+            continue
+        remaining_attempts -= 1
+        if remaining_attempts <= 0:
+            raise OSError(
+                f"Consumer stopped accepting data mid-frame: "
+                f"{sent} bytes out of {msg_size} written, connection is out of sync",
+            )
 
 
 def _socketcan_send(
@@ -313,6 +419,54 @@ def _socketcan_send_msg(
     send_fn(header + message.data.ljust(8, b"\0"))
 
 
+def _socketcan_send_stream(
+    send_fn: SendMsgFn,
+    arbitration_id: int,
+    data: bytes | bytearray,
+    is_extended: bool = False,  # noqa: FBT001, FBT002
+    timeout: float | None = None,
+    # Note: all parameters below are injected as default arguments so they are accessed faster
+    # Warning: these defaulted parameters are mainly there
+    # to inject the constants in local scope and speed up their access.
+    _msg_size: int = 16,
+    _attempts: int = STREAM_SEND_ATTEMPTS,
+) -> None:
+    """
+    Stream-socket variant of `_socketcan_send`: completes the frame if the socket
+    only took part of it, since a stream gives no framing of its own.
+    """
+    header = build_tx_header(arbitration_id, data.__len__(), is_extended_id=is_extended)
+    payload = header + data.ljust(8, b"\0")
+    sent = send_fn(payload)
+    if sent < _msg_size:
+        _complete_send(send_fn, payload, sent, _msg_size, _attempts)
+
+
+def _socketcan_send_msg_stream(
+    send_fn: SendMsgFn,
+    message: CanMessageProtocol,
+    timeout: float | None = None,
+    # Note: all parameters below are injected as default arguments so they are accessed faster
+    # Warning: these defaulted parameters are mainly there
+    # to inject the constants in local scope and speed up their access.
+    _msg_size: int = 16,
+    _attempts: int = STREAM_SEND_ATTEMPTS,
+) -> None:
+    """
+    Stream-socket variant of `_socketcan_send_msg`: completes the frame if the socket
+    only took part of it, since a stream gives no framing of its own.
+    """
+    header = build_tx_header(
+        message.arbitration_id,
+        message.data.__len__(),
+        is_extended_id=message.is_extended_id,
+    )
+    payload = header + message.data.ljust(8, b"\0")
+    sent = send_fn(payload)
+    if sent < _msg_size:
+        _complete_send(send_fn, payload, sent, _msg_size, _attempts)
+
+
 # SendFn -> to pass directly arbitration_id, data and extended flag as args
 # MessageSendFn -> when passing a container implementing CanMessageProtocol to the sender
 type SendFn = Callable[[int, bytes | bytearray, bool, float | None], None]
@@ -320,18 +474,40 @@ type MessageSendFn = Callable[[CanMessageProtocol, float | None], None]
 
 
 @overload
-def build_send_func(fd: SocketcanFd, *, expects_msg_cls: Literal[True]) -> MessageSendFn: ...
+def build_send_func(
+    fd: SocketcanFd,
+    *,
+    expects_msg_cls: Literal[True],
+    is_stream: bool = False,
+) -> MessageSendFn: ...
 
 
 @overload
-def build_send_func(fd: SocketcanFd, *, expects_msg_cls: Literal[False]) -> SendFn: ...
+def build_send_func(
+    fd: SocketcanFd,
+    *,
+    expects_msg_cls: Literal[False],
+    is_stream: bool = False,
+) -> SendFn: ...
 
 
-def build_send_func(fd: SocketcanFd, *, expects_msg_cls: bool = False) -> SendFn | MessageSendFn:
+def build_send_func(
+    fd: SocketcanFd,
+    *,
+    expects_msg_cls: bool = False,
+    is_stream: bool = False,
+) -> SendFn | MessageSendFn:
     """
     Builds the send function for socketcan socket `fd`.
+
+    `is_stream` must mirror what was passed to `build_recv_func` for the same socket:
+    a datagram socket writes a frame or nothing, whereas a stream one may take only
+    part of it and needs the frame completed before the next one is written.
     """
     if expects_msg_cls:
+        if is_stream:
+            return partial(_socketcan_send_msg_stream, fd.send)
         return partial(_socketcan_send_msg, fd.send)
-    else:
-        return partial(_socketcan_send, fd.send)
+    if is_stream:
+        return partial(_socketcan_send_stream, fd.send)
+    return partial(_socketcan_send, fd.send)

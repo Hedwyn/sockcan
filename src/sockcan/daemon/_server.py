@@ -37,7 +37,14 @@ from urllib.parse import parse_qs, unquote, urlparse
 import can
 from can import BusState, Message
 
-from sockcan import RecvFn, SendFn, SocketcanFd, build_recv_func, build_send_func
+from sockcan import (
+    RecvFn,
+    SendFn,
+    SocketcanFd,
+    build_recv_func,
+    build_send_func,
+    disable_nagle,
+)
 
 from ._client import ping_daemon
 
@@ -147,6 +154,8 @@ def _inet_stream_socket_pair() -> tuple[socket.socket, socket.socket]:
         raise
     finally:
         listener.close()
+    disable_nagle(conn1)
+    disable_nagle(conn2)
     return conn1, conn2
 
 
@@ -210,6 +219,21 @@ class _Consumer(NamedTuple):
     filters: list[CanFilter] | None
 
 
+def _aggregate_filters(consumers: list[_Consumer]) -> list[CanFilter] | None:
+    """
+    Aggregates every consumer's filters into the single set the real bus
+    must apply: the bus has to receive the union of what any consumer
+    wants, so a consumer with no filters (wants everything) forces no
+    filtering at all.
+    """
+    aggregated: list[CanFilter] = []
+    for consumer in consumers:
+        if not consumer.filters:
+            return None
+        aggregated.extend(consumer.filters)
+    return aggregated
+
+
 class _ConsumerIO:
     """
     Per-consumer selector state.
@@ -271,6 +295,11 @@ class SocketcanServer:
         self._bus = bus
         self._selector = DefaultSelector()
         self._kill_switch_rx, self._kill_switch_tx = socket.socketpair()
+        # On Windows, socketpair() falls back to a TCP pair: these sockets carry the
+        # wake-ups that interrupt the TX thread's selection, so they cannot afford
+        # to be sat on by Nagle.
+        disable_nagle(self._kill_switch_rx)
+        disable_nagle(self._kill_switch_tx)
         self._running: bool = False
         self._threads: list[Thread] = []
         self.use_native_timestamps = use_native_timestamps
@@ -297,6 +326,16 @@ class SocketcanServer:
         """
         return self._running
 
+    def _refresh_bus_filters(self) -> None:
+        """
+        Pushes the union of all consumers' filters down to the real bus, so
+        the kernel/hardware only forwards frames some consumer actually
+        wants instead of every frame on the wire.
+        """
+        if self._bus is None:
+            return
+        self._bus.set_filters(_aggregate_filters(self._consumers))
+
     def listen_to(
         self,
         fd: SocketcanFd,
@@ -314,7 +353,7 @@ class SocketcanServer:
                 "Server is configured to DGRAM mode, cannot listen to SOCK_STREAM socket",
             )
 
-        send_fn = build_send_func(fd, expects_msg_cls=False)
+        send_fn = build_send_func(fd, expects_msg_cls=False, is_stream=use_stream)
         recv_fn = build_recv_func(
             fd,
             use_native_timestamps=self.use_native_timestamps,
@@ -322,10 +361,14 @@ class SocketcanServer:
         )
         if use_stream:
             _set_send_timeout(fd, self._send_timeout)
+            # One send() per frame: Nagle would hold them back and release them in
+            # bursts, destroying the inter-frame spacing consumers rely on.
+            disable_nagle(fd)
         io_state = _ConsumerIO(send_fn, recv_fn)
         _logger.info("Registering new consumer with filters: %s", normalized_filters)
         self._consumers.append(_Consumer(send_fn, fd, normalized_filters))
         self._consumer_io[fd] = io_state
+        self._refresh_bus_filters()
         # KeyError is expected if Socket is already registered (e.g., HTTP upgrade socket)
         # This is fine, we'll handle it in the HTTP handler thread
         with contextlib.suppress(KeyError):
@@ -445,14 +488,17 @@ class SocketcanServer:
         selector = self._selector
         kill_switch_tx = self._kill_switch_tx
         dead_consumer_fds = self._dead_consumer_fds
+        refresh_bus_filters = self._refresh_bus_filters
         closed_connections: list[_Consumer] = []
         is_stream = self._use_stream
         while True:
+            consumers_changed = False
             if closed_connections:
                 for consumer in closed_connections:
                     consumers.remove(consumer)
                     del consumer_io[consumer.fd]
                 closed_connections.clear()
+                consumers_changed = True
 
             while True:
                 try:
@@ -465,7 +511,11 @@ class SocketcanServer:
                 for consumer in consumers:
                     if consumer.fd is dead_fd:
                         consumers.remove(consumer)
+                        consumers_changed = True
                         break
+
+            if consumers_changed:
+                refresh_bus_filters()
 
             next_message = recv()
             assert next_message is not None
