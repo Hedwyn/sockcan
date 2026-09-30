@@ -28,9 +28,9 @@ from enum import Enum, auto
 from functools import cache, partial
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from queue import Empty, SimpleQueue
-from selectors import EVENT_READ, EVENT_WRITE, DefaultSelector
+from selectors import EVENT_READ, EVENT_WRITE, BaseSelector, DefaultSelector
 from socketserver import ThreadingMixIn
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 from typing import TYPE_CHECKING, NamedTuple, Self, cast
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -162,6 +162,18 @@ def _inet_stream_socket_pair() -> tuple[socket.socket, socket.socket]:
 ENDPOINT_NOT_CONNECTED_ERRNO = errno.ENOTCONN
 CONNECTION_REFUSED_ERRRNO = errno.ECONNREFUSED
 
+# A send that could not go through right away reports it differently depending on the
+# platform: Linux fails the write with EAGAIN/EWOULDBLOCK (`BlockingIOError`) when
+# SO_SNDTIMEO expires, Windows with WSAETIMEDOUT (`TimeoutError`). Both mean the same
+# thing - the consumer is momentarily full - and both must lead to the frame being
+# queued rather than dropped.
+WOULD_BLOCK = (TimeoutError, BlockingIOError)
+
+# Ceiling on how far behind a consumer may fall before it is disconnected. Backlogs are
+# meant to absorb a hiccup; a consumer this far behind has stopped reading altogether,
+# and buffering for it without end would take the daemon down with it.
+MAX_CONSUMER_BACKLOG = 100_000
+
 
 def _set_send_timeout(sock: socket.socket, seconds: float) -> None:
     """
@@ -234,6 +246,32 @@ def _aggregate_filters(consumers: list[_Consumer]) -> list[CanFilter] | None:
     return aggregated
 
 
+def _queue_or_evict(
+    io_state: _ConsumerIO,
+    frame: tuple[int, bytes | bytearray, bool],
+    fd: FileDescriptorLike,
+    selector: BaseSelector,
+    selector_lock: Lock,
+) -> bool:
+    """
+    Queues `frame` for a consumer whose socket is momentarily full, and makes sure the
+    selector watches it for write-readiness so the TX thread drains it.
+
+    Returns
+    -------
+    bool
+        False if the consumer is too far behind to be worth keeping, in which case the
+        caller is expected to drop it.
+    """
+    outbound = io_state.outbound
+    if len(outbound) >= MAX_CONSUMER_BACKLOG:
+        return False
+    with selector_lock:
+        outbound.append(frame)
+        selector.modify(fd, EVENT_READ | EVENT_WRITE, io_state)
+    return True
+
+
 class _ConsumerIO:
     """
     Per-consumer selector state.
@@ -291,6 +329,13 @@ class SocketcanServer:
         # removes entries from `_consumers`/`_consumer_io`, so this queue is
         # the sole cross-thread hand-off, keeping both collections single-writer.
         self._dead_consumer_fds: SimpleQueue[FileDescriptorLike] = SimpleQueue()
+        # Guards the pair "is this consumer's backlog empty" / "what does the selector
+        # watch it for". The RX thread promotes an fd to EVENT_WRITE when it queues a
+        # frame, the TX thread demotes it back once the backlog is drained, and without
+        # a lock the demotion can land right after a promotion and strand the backlog:
+        # nothing would be watching for write-readiness any more, and every later frame
+        # for that consumer would queue behind it forever.
+        self._selector_lock = Lock()
         self._kill_switch = Event
         self._bus = bus
         self._selector = DefaultSelector()
@@ -366,8 +411,11 @@ class SocketcanServer:
             disable_nagle(fd)
         io_state = _ConsumerIO(send_fn, recv_fn)
         _logger.info("Registering new consumer with filters: %s", normalized_filters)
-        self._consumers.append(_Consumer(send_fn, fd, normalized_filters))
+        # `_consumer_io` first: the RX thread looks up `consumer_io[fd]` for every
+        # consumer it iterates, so a consumer must never be visible in `_consumers`
+        # before its IO state exists.
         self._consumer_io[fd] = io_state
+        self._consumers.append(_Consumer(send_fn, fd, normalized_filters))
         self._refresh_bus_filters()
         # KeyError is expected if Socket is already registered (e.g., HTTP upgrade socket)
         # This is fine, we'll handle it in the HTTP handler thread
@@ -489,6 +537,7 @@ class SocketcanServer:
         kill_switch_tx = self._kill_switch_tx
         dead_consumer_fds = self._dead_consumer_fds
         refresh_bus_filters = self._refresh_bus_filters
+        selector_lock = self._selector_lock
         closed_connections: list[_Consumer] = []
         is_stream = self._use_stream
         while True:
@@ -537,11 +586,22 @@ class SocketcanServer:
                     continue
                 try:
                     sender(can_id, data, is_extended, None)
-                except TimeoutError:
-                    # SO_SNDTIMEO fired: consumer can't keep up right now.
-                    # Queue the frame and hand it off to the TX thread.
-                    outbound.append((can_id, data, is_extended))
-                    selector.modify(fd, EVENT_READ | EVENT_WRITE, io_state)
+                except WOULD_BLOCK:
+                    # The consumer can't keep up right now. Queue the frame and hand it
+                    # off to the TX thread rather than dropping it on the floor.
+                    if not _queue_or_evict(
+                        io_state,
+                        (can_id, data, is_extended),
+                        fd,
+                        selector,
+                        selector_lock,
+                    ):
+                        _logger.warning(
+                            "Consumer is %d frames behind and still not reading, dropping it",
+                            MAX_CONSUMER_BACKLOG,
+                        )
+                        closed_connections.append(consumer)
+                        continue
                     kill_switch_tx.send(b"0")
                 except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                     # ConnectionAbortedError (WinError 10053) happens on Windows
@@ -587,7 +647,9 @@ class SocketcanServer:
         contention_time = self.contention_time
         kill_switch = self._kill_switch_rx
         consumers = self._consumers
+        consumer_io = self._consumer_io
         dead_consumer_fds = self._dead_consumer_fds
+        selector_lock = self._selector_lock
         is_stream = self._use_stream
         sleep = time.sleep
         monotonic_time_ns = time.monotonic_ns
@@ -640,8 +702,30 @@ class SocketcanServer:
                             # subscribed with filters still receives every frame any
                             # other consumer sends.
                             continue
+                        dest_io = consumer_io.get(fd)
+                        if dest_io is None:
+                            # Already being torn down by the RX thread
+                            continue
+                        frame = (msg.arbitration_id, msg.data, msg.is_extended_id)
+                        if dest_io.outbound:
+                            # Already backed up: keep ordering, let the write-readiness
+                            # path drain the backlog instead of racing ahead of it.
+                            dest_io.outbound.append(frame)
+                            continue
                         try:
                             send_fn(msg.arbitration_id, msg.data, msg.is_extended_id, None)
+                        except WOULD_BLOCK:
+                            # Same contract as the RX path: a consumer that is full for a
+                            # moment gets its frames queued, never silently discarded.
+                            if not _queue_or_evict(dest_io, frame, fd, selector, selector_lock):
+                                _logger.warning(
+                                    "Consumer is %d frames behind and still not reading, "
+                                    "dropping it",
+                                    MAX_CONSUMER_BACKLOG,
+                                )
+                                selector.unregister(fd)
+                                dead_consumer_fds.put(fd)
+                            continue
                         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                             continue
                         except OSError as exc:
@@ -671,31 +755,41 @@ class SocketcanServer:
 
                 if events & EVENT_WRITE:
                     outbound = io_state.outbound
-                    if outbound:
+                    disconnected = False
+                    # Drain as much as the socket takes: one frame per readiness event
+                    # would need a full selection round trip per frame, which a consumer
+                    # that fell behind by thousands of them would never catch up from.
+                    while outbound:
                         can_id, data, is_extended = outbound[0]
                         try:
                             io_state.sender(can_id, data, is_extended, None)
-                        except TimeoutError:
-                            pass  # still backed up, retry on next ready event
+                        except WOULD_BLOCK:
+                            break  # still backed up, resume on the next ready event
                         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
-                            selector.unregister(fileobj)
-                            dead_consumer_fds.put(fileobj)
-                            continue
+                            disconnected = True
+                            break
                         except OSError as exc:
                             if is_stream:
                                 _logger.warning("Send to consumer failed: %s", exc)
-                                selector.unregister(fileobj)
-                                dead_consumer_fds.put(fileobj)
-                                continue
+                                disconnected = True
+                                break
                             if exc.errno not in (
                                 ENDPOINT_NOT_CONNECTED_ERRNO,
                                 CONNECTION_REFUSED_ERRRNO,
                             ):
                                 raise
+                            outbound.popleft()
                         else:
                             outbound.popleft()
-                    if not outbound:
-                        selector.modify(fileobj, EVENT_READ, io_state)
+                    if disconnected:
+                        selector.unregister(fileobj)
+                        dead_consumer_fds.put(fileobj)
+                        continue
+                    # Checking the backlog and dropping the write interest have to be
+                    # atomic against the RX thread doing the opposite, see `_selector_lock`.
+                    with selector_lock:
+                        if not outbound:
+                            selector.modify(fileobj, EVENT_READ, io_state)
         _logger.info("Stopping sender thread, we've got terminated")
 
 

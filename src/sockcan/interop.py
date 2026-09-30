@@ -11,6 +11,7 @@ import atexit
 import logging
 import os
 import platform
+import socket
 import sys
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -42,6 +43,12 @@ if TYPE_CHECKING:
 
 
 _logger = logging.getLogger(__name__)
+
+# Probed once, at module scope: `socket.AF_UNIX` only exists where the platform and the
+# Python build both support it, which on Windows is far from a given. It has to be read
+# here rather than where it is used, since the name `socket` is taken by a parameter in
+# the one place that needs the answer.
+HAS_AF_UNIX = hasattr(socket, "AF_UNIX")
 
 
 def _matches_filters(
@@ -168,7 +175,9 @@ class UserspaceSocketcanBus:
             # Pass can_filters directly to _get_socket
             socket = self._get_socket(channel, can_filters)
         self.socket = socket
-        is_stream = _global_config.mode == "daemon" or not hasattr(socket, "AF_UNIX")
+        # Note: `socket` here is this method's parameter, not the module - hence the
+        # module-level `HAS_AF_UNIX` rather than probing it inline.
+        is_stream = _global_config.mode == "daemon" or not HAS_AF_UNIX
         # Note: send and recv must agree on the framing, see `build_send_func`.
         self.send = build_send_func(self.socket, expects_msg_cls=True, is_stream=is_stream)
         self._base_recv = build_recv_func(
