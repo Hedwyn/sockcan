@@ -169,10 +169,15 @@ CONNECTION_REFUSED_ERRRNO = errno.ECONNREFUSED
 # queued rather than dropped.
 WOULD_BLOCK = (TimeoutError, BlockingIOError)
 
-# Ceiling on how far behind a consumer may fall before it is disconnected. Backlogs are
-# meant to absorb a hiccup; a consumer this far behind has stopped reading altogether,
-# and buffering for it without end would take the daemon down with it.
-MAX_CONSUMER_BACKLOG = 100_000
+# How many frames are held back for a consumer that cannot keep up. Backlogs are meant to
+# absorb a hiccup; once one is full, the oldest frames are dropped to make room for new
+# ones, since stale traffic is worth less than fresh traffic. The consumer stays connected.
+CONSUMER_BACKLOG_SIZE = 10_000
+
+# Explicit send buffer of every consumer socket, in bytes (~4k 8-byte frames; Linux
+# doubles it for bookkeeping). Left to the OS, it autotunes up to megabytes and the
+# buffering a consumer experiences stops being predictable.
+CONSUMER_SEND_BUFFER_SIZE = 64 * 1024
 
 
 def _set_send_timeout(sock: socket.socket, seconds: float) -> None:
@@ -313,30 +318,37 @@ def _aggregate_filters(consumers: list[_Consumer]) -> list[CanFilter] | None:
     return aggregated
 
 
-def _queue_or_evict(
+def _queue_frame(
     io_state: _ConsumerIO,
     frame: tuple[int, bytes | bytearray, bool],
     fd: FileDescriptorLike,
     selector: BaseSelector,
     selector_lock: Lock,
-) -> bool:
+) -> None:
     """
     Queues `frame` for a consumer whose socket is momentarily full, and makes sure the
     selector watches it for write-readiness so the TX thread drains it.
 
-    Returns
-    -------
-    bool
-        False if the consumer is too far behind to be worth keeping, in which case the
-        caller is expected to drop it.
+    If the backlog is full, the oldest queued frame is dropped to make room.
     """
     outbound = io_state.outbound
-    if len(outbound) >= MAX_CONSUMER_BACKLOG:
-        return False
+    if len(outbound) == CONSUMER_BACKLOG_SIZE:
+        _note_dropped_frame(io_state)
     with selector_lock:
         outbound.append(frame)
         selector.modify(fd, EVENT_READ | EVENT_WRITE, io_state)
-    return True
+
+
+def _note_dropped_frame(io_state: _ConsumerIO) -> None:
+    """
+    Accounts for one frame evicted from a full backlog, warning on the first of a streak.
+    """
+    if not io_state.dropped:
+        _logger.warning(
+            "Consumer is %d frames behind, dropping its oldest frames",
+            CONSUMER_BACKLOG_SIZE,
+        )
+    io_state.dropped += 1
 
 
 class _ConsumerIO:
@@ -348,12 +360,17 @@ class _ConsumerIO:
     queue for frames that couldn't be sent inline within `send_timeout`.
     """
 
-    __slots__ = ("outbound", "recv_fn", "sender")
+    __slots__ = ("dropped", "outbound", "recv_fn", "sender")
 
     def __init__(self, sender: SendFn, recv_fn: RecvFn) -> None:
         self.sender = sender
         self.recv_fn = recv_fn
-        self.outbound: deque[tuple[int, bytes | bytearray, bool]] = deque()
+        # Bounded: appending to a full deque drops its oldest frame.
+        self.outbound: deque[tuple[int, bytes | bytearray, bool]] = deque(
+            maxlen=CONSUMER_BACKLOG_SIZE,
+        )
+        # Frames dropped since the backlog last emptied.
+        self.dropped = 0
 
 
 class SocketcanServer:
@@ -474,6 +491,7 @@ class SocketcanServer:
         )
         if use_stream:
             _set_send_timeout(fd, self._send_timeout)
+            fd.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, CONSUMER_SEND_BUFFER_SIZE)
             # One send() per frame: Nagle would hold them back and release them in
             # bursts, destroying the inter-frame spacing consumers rely on.
             disable_nagle(fd)
@@ -615,6 +633,9 @@ class SocketcanServer:
         selector_lock = self._selector_lock
         closed_connections: list[_Consumer] = []
         is_stream = self._use_stream
+        backlog_size = CONSUMER_BACKLOG_SIZE
+        note_dropped_frame = _note_dropped_frame
+        queue_frame = _queue_frame
         while True:
             consumers_changed = False
             if closed_connections:
@@ -657,6 +678,8 @@ class SocketcanServer:
                 if outbound:
                     # Already backed up: keep ordering, let the TX thread's
                     # selector drain the backlog instead of racing ahead.
+                    if len(outbound) == backlog_size:
+                        note_dropped_frame(io_state)
                     outbound.append((can_id, data, is_extended))
                     continue
                 try:
@@ -664,19 +687,13 @@ class SocketcanServer:
                 except WOULD_BLOCK:
                     # The consumer can't keep up right now. Queue the frame and hand it
                     # off to the TX thread rather than dropping it on the floor.
-                    if not _queue_or_evict(
+                    queue_frame(
                         io_state,
                         (can_id, data, is_extended),
                         fd,
                         selector,
                         selector_lock,
-                    ):
-                        _logger.warning(
-                            "Consumer is %d frames behind and still not reading, dropping it",
-                            MAX_CONSUMER_BACKLOG,
-                        )
-                        closed_connections.append(consumer)
-                        continue
+                    )
                     kill_switch_tx.send(b"0")
                 except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                     # ConnectionAbortedError (WinError 10053) happens on Windows
@@ -728,6 +745,9 @@ class SocketcanServer:
         dead_consumer_fds = self._dead_consumer_fds
         selector_lock = self._selector_lock
         is_stream = self._use_stream
+        backlog_size = CONSUMER_BACKLOG_SIZE
+        note_dropped_frame = _note_dropped_frame
+        queue_frame = _queue_frame
         sleep = time.sleep
         monotonic_time_ns = time.monotonic_ns
         contention_time_ns = None if contention_time is None else round(contention_time * 1e9)
@@ -787,6 +807,8 @@ class SocketcanServer:
                         if dest_io.outbound:
                             # Already backed up: keep ordering, let the write-readiness
                             # path drain the backlog instead of racing ahead of it.
+                            if len(dest_io.outbound) == backlog_size:
+                                note_dropped_frame(dest_io)
                             dest_io.outbound.append(frame)
                             continue
                         try:
@@ -794,14 +816,7 @@ class SocketcanServer:
                         except WOULD_BLOCK:
                             # Same contract as the RX path: a consumer that is full for a
                             # moment gets its frames queued, never silently discarded.
-                            if not _queue_or_evict(dest_io, frame, fd, selector, selector_lock):
-                                _logger.warning(
-                                    "Consumer is %d frames behind and still not reading, "
-                                    "dropping it",
-                                    MAX_CONSUMER_BACKLOG,
-                                )
-                                selector.unregister(fd)
-                                dead_consumer_fds.put(fd)
+                            queue_frame(dest_io, frame, fd, selector, selector_lock)
                             continue
                         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                             continue
@@ -837,6 +852,10 @@ class SocketcanServer:
                     # would need a full selection round trip per frame, which a consumer
                     # that fell behind by thousands of them would never catch up from.
                     while outbound:
+                        # The RX thread may evict outbound[0] on overflow between this
+                        # peek and the popleft below, in which case the popleft discards
+                        # a newer frame instead: at most one extra loss, only while the
+                        # backlog is overflowing and dropping frames anyway.
                         can_id, data, is_extended = outbound[0]
                         try:
                             io_state.sender(can_id, data, is_extended, None)
@@ -867,6 +886,12 @@ class SocketcanServer:
                     with selector_lock:
                         if not outbound:
                             selector.modify(fileobj, EVENT_READ, io_state)
+                            if io_state.dropped:
+                                _logger.warning(
+                                    "Consumer caught up, %d frames were dropped meanwhile",
+                                    io_state.dropped,
+                                )
+                                io_state.dropped = 0
         _logger.info("Stopping sender thread, we've got terminated")
 
 

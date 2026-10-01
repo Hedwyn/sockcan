@@ -39,8 +39,8 @@ if TYPE_CHECKING:
 KNUTH_HASH = 2654435761
 FRAME_ID = 0x200
 # Socket buffers are squeezed on both ends of a consumer's connection so that a
-# burst overflows it within a few thousand frames instead of the ~160k the default
-# 2.5 MB send buffer would swallow. They are restored before the consumer resumes
+# burst overflows it within a few hundred frames instead of the thousands the daemon's
+# regular send buffer swallows. They are restored before the consumer resumes
 # reading, so the backlog drains at normal speed.
 SQUEEZED_BUFFER = 2048
 ROOMY_BUFFER = 1 << 20
@@ -341,8 +341,9 @@ def test_bidirectional_under_load() -> None:
 def test_slow_consumer_does_not_lose_frames_on_tx_path() -> None:
     """
     A consumer that stops reading long enough for the daemon to run out of room must
-    not lose frames: they belong in that consumer's backlog, to be delivered once it
-    catches up.
+    not lose frames as long as its backlog has room: they belong there, to be delivered
+    once it catches up. (Past the backlog's capacity the oldest frames are dropped on
+    purpose, see the overflow tests below.)
 
     Regression test: `_run_tx`'s consumer-to-consumer short-circuit had no branch for
     a send that could not go through right away. `SO_SNDTIMEO` expiring raises
@@ -351,7 +352,7 @@ def test_slow_consumer_does_not_lose_frames_on_tx_path() -> None:
     nor the consumer was told. The healthy consumer staying intact throughout is what
     tells a relay bug apart from the load simply being too high.
     """
-    count = 30_000
+    count = 5_000
     with running_daemon("vstress") as daemon:
         sender = connect(daemon, "vstress")
         healthy = connect(daemon, "vstress")
@@ -382,7 +383,7 @@ def test_slow_consumer_does_not_lose_frames_on_rx_path() -> None:
     consumer was not just skipped but evicted outright, silently killing the
     subscription.
     """
-    count = 30_000
+    count = 5_000
     channel = "vstress_rx"
     with running_daemon(channel, interface="virtual") as daemon:
         healthy = connect(daemon, channel)
@@ -402,6 +403,89 @@ def test_slow_consumer_does_not_lose_frames_on_rx_path() -> None:
             )
             healthy.integrity(count).assert_intact()
             slow.integrity(count).assert_intact()
+        finally:
+            bus.shutdown()
+            for consumer in (healthy, slow):
+                consumer.stop()
+
+
+# Small enough that a burst overflows it, big enough to tell "newest frames kept" from
+# "nothing kept" apart.
+SMALL_BACKLOG = 1_000
+
+
+def assert_newest_frames_kept(slow: Consumer, count: int, backlog: int) -> None:
+    """
+    Checks what a consumer that overflowed its backlog is left with: frames that are
+    intact, once, in order, ending with the very last one sent, and with the whole
+    newest `backlog` of them present - the oldest are the ones sacrificed.
+    """
+    received = slow.integrity(count)
+    assert not received.duplicated, f"frames were duplicated: {received.describe()}"
+    assert not received.reordered, f"frames were reordered: {received.describe()}"
+    assert len(slow.received) < count, "nothing was dropped, the backlog never overflowed"
+    assert slow.received[-1] == count - 1, f"newest frame lost: {received.describe()}"
+    tail = set(slow.received)
+    lost_recent = [seq for seq in range(count - backlog + 1, count) if seq not in tail]
+    # one frame of slack: see the peek/popleft race noted in `_run_tx`
+    assert len(lost_recent) <= 1, f"recent frames dropped: {lost_recent[:10]}"
+
+
+def test_slow_consumer_drops_oldest_on_tx_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    A consumer that falls further behind than its backlog holds loses the oldest
+    frames, stays connected, and does not disturb the others.
+    """
+    monkeypatch.setattr("sockcan.daemon._server.CONSUMER_BACKLOG_SIZE", SMALL_BACKLOG)
+    count = 30_000
+    with running_daemon("vstress") as daemon:
+        sender = connect(daemon, "vstress")
+        healthy = connect(daemon, "vstress")
+        slow = connect(daemon, "vstress", squeezable=True)
+        try:
+            with slow.hold():
+                for seq in range(count):
+                    sender.publish(seq)
+                time.sleep(1.0)
+            slow.wait_for(count)
+            healthy.wait_for(count)
+
+            server = daemon._servers["vstress"]
+            assert len(server._consumers) == 3, (
+                f"a consumer was evicted: {len(server._consumers)} left out of 3"
+            )
+            healthy.integrity(count).assert_intact()
+            assert_newest_frames_kept(slow, count, SMALL_BACKLOG)
+        finally:
+            for consumer in (sender, healthy, slow):
+                consumer.stop()
+
+
+def test_slow_consumer_drops_oldest_on_rx_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Same on the bus-to-consumer path.
+    """
+    monkeypatch.setattr("sockcan.daemon._server.CONSUMER_BACKLOG_SIZE", SMALL_BACKLOG)
+    count = 30_000
+    channel = "vstress_rx_drop"
+    with running_daemon(channel, interface="virtual") as daemon:
+        healthy = connect(daemon, channel)
+        slow = connect(daemon, channel, squeezable=True)
+        bus = can.Bus(interface="virtual", channel=channel)
+        try:
+            with slow.hold():
+                for seq in range(count):
+                    bus.send(can.Message(arbitration_id=0x200, data=payload(seq)))
+                time.sleep(1.0)
+            slow.wait_for(count)
+            healthy.wait_for(count)
+
+            server = daemon._servers[channel]
+            assert len(server._consumers) == 2, (
+                f"a consumer was evicted: {len(server._consumers)} left out of 2"
+            )
+            healthy.integrity(count).assert_intact()
+            assert_newest_frames_kept(slow, count, SMALL_BACKLOG)
         finally:
             bus.shutdown()
             for consumer in (healthy, slow):
