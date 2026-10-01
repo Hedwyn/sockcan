@@ -317,7 +317,10 @@ def _create_deferred_userspace_socketcan_bus(
     return UserspaceSocketcanBus(channel, can_filters, socket, **kwargs)
 
 
-def _init_global_server(bus_parameters: BusParameters | None = None) -> SocketcanServer:
+def _init_global_server(
+    bus_parameters: BusParameters | None = None,
+    contention_time: float | None = None,
+) -> SocketcanServer:
     bus_parameters = bus_parameters or BusParameters()
     bus = can.Bus(
         interface=bus_parameters.interface,
@@ -326,7 +329,7 @@ def _init_global_server(bus_parameters: BusParameters | None = None) -> Socketca
     )
     # making
     atexit.register(bus.shutdown)
-    server = SocketcanServer(bus)
+    server = SocketcanServer(bus, contention_time=contention_time)
     server.start()
     atexit.register(server.stop)
     return server
@@ -431,7 +434,7 @@ def activate_userspace_socketcan(
             channel = params.channel
             if channel in _local_servers:
                 raise RuntimeError(f"A server is already started for channel {channel}")
-            server = _init_global_server(params)
+            server = _init_global_server(params, contention_time=config.min_contention_time)
             _local_servers[channel] = server
 
     elif config.mode == "daemon":
