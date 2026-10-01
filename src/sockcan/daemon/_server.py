@@ -49,7 +49,7 @@ from sockcan import (
 from ._client import ping_daemon
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Generator
 
     from _typeshed import FileDescriptorLike
     from can import BusABC
@@ -221,6 +221,73 @@ class BusParameters:
     virtual: bool = False
 
 
+class _CandumpWriter:
+    """
+    Appends CAN frames to a .trc-like trace file.
+
+    Shared by the RX thread (bus->consumers frames) and TX thread
+    (consumers->bus frames), which append independently, so writes are
+    serialized with a lock.
+    """
+
+    __slots__ = ("_counter", "_file", "_lock", "_start_ns")
+
+    def __init__(self, path: str) -> None:
+        self._file = open(path, "w")  # noqa: SIM115
+        self._lock = Lock()
+        self._start_ns = time.monotonic_ns()
+        self._counter = 0
+        self._file.write(";$FILEVERSION=1.1\n")
+        self._file.write(f";$STARTTIME={time.time():.6f}\n")
+        self._file.write(";$COLUMNS=N,T,B,I,d,L,D\n")
+
+    def write(
+        self,
+        can_id: int,
+        data: bytes | bytearray,
+        *,
+        is_extended: bool,
+        direction: str,
+    ) -> None:
+        offset_ms = (time.monotonic_ns() - self._start_ns) / 1e6
+        id_field = f"{can_id:08X}" if is_extended else f"{can_id:03X}"
+        payload = " ".join(f"{byte:02X}" for byte in data)
+        with self._lock:
+            self._counter += 1
+            self._file.write(
+                f"{self._counter:>7}) {offset_ms:>13.1f} 1 {direction} "
+                f"{id_field:>8} {len(data)} {payload}\n",
+            )
+
+    def close(self) -> None:
+        self._file.close()
+
+
+def _candump_recv(recv: Callable[[], Message | None], writer: _CandumpWriter) -> Message | None:
+    """
+    Candump-aware stand-in for `BusABC.recv`, dropped into `_run_rx`'s local
+    `recv` variable in place of the plain `self._bus.recv` when candump is
+    enabled, so the hot path never carries this check or indirection.
+    """
+    msg = recv()
+    if msg is not None:
+        writer.write(msg.arbitration_id, msg.data, is_extended=msg.is_extended_id, direction="Rx")
+    return msg
+
+
+def _candump_send(
+    send: Callable[[Message], None],
+    writer: _CandumpWriter,
+    msg: Message,
+) -> None:
+    """
+    Candump-aware stand-in for `BusABC.send`, dropped into `_run_tx`'s local
+    `bus_send` variable in place of `self._bus.send` when candump is enabled.
+    """
+    writer.write(msg.arbitration_id, msg.data, is_extended=msg.is_extended_id, direction="Tx")
+    send(msg)
+
+
 class _Consumer(NamedTuple):
     """
     Stores the information required about a consumer in a minimal format.
@@ -347,6 +414,7 @@ class SocketcanServer:
         disable_nagle(self._kill_switch_tx)
         self._running: bool = False
         self._threads: list[Thread] = []
+        self._candump_writer: _CandumpWriter | None = None
         self.use_native_timestamps = use_native_timestamps
         self._selector.register(self._kill_switch_rx, events=EVENT_READ, data=None)
         self._use_stream = use_stream
@@ -484,6 +552,8 @@ class SocketcanServer:
             raise RuntimeError("Already started")
         self._threads.clear()
         self._running = True
+        if candump_path := os.environ.get("SOCKCAN_CANDUMP"):
+            self._candump_writer = _CandumpWriter(candump_path)
         if direction != ServerDirection.TX_ONLY and not self.is_virtual:
             rx_thread = Thread(target=self.run_rx, daemon=True)
             rx_thread.start()
@@ -502,6 +572,9 @@ class SocketcanServer:
         _logger.info("Stopping socketcanserver on %s", self._bus)
         self._kill_switch_tx.send(b"0")
         self._running = False
+        if self._candump_writer is not None:
+            self._candump_writer.close()
+            self._candump_writer = None
 
     def join(self) -> None:
         """
@@ -531,6 +604,8 @@ class SocketcanServer:
         """
         assert self._bus is not None, "RX thread can only real in non-virtual mode"
         recv = self._bus.recv
+        if self._candump_writer is not None:
+            recv = partial(_candump_recv, recv, self._candump_writer)
         consumers = self._consumers
         consumer_io = self._consumer_io
         selector = self._selector
@@ -644,6 +719,8 @@ class SocketcanServer:
         """
         selector = self._selector
         bus_send = self._bus.send if self._bus else None
+        if bus_send is not None and self._candump_writer is not None:
+            bus_send = partial(_candump_send, bus_send, self._candump_writer)
         contention_time = self.contention_time
         kill_switch = self._kill_switch_rx
         consumers = self._consumers
